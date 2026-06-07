@@ -12,15 +12,19 @@ import {
 } from "./api";
 import { ADMIN_ID, PAGE_SIZE, STAR_AMOUNTS } from "./constants";
 import {
+  addAdmin,
   getAdminState,
   getMovieById,
   getSettings,
   indexMovie,
+  isUserAdmin,
+  listAdmins,
   listGroups,
   listUsers,
   markGroupInactive,
   markUserBlocked,
   recordPayment,
+  removeAdmin,
   searchMovies,
   setAdminState,
   stats,
@@ -31,6 +35,7 @@ import {
 } from "./db";
 import {
   adminPanelKeyboard,
+  adminsListKeyboard,
   decodeQuery,
   encodeQuery,
   resultsKeyboard,
@@ -47,8 +52,12 @@ async function getMe() {
   return _me;
 }
 
-function isAdmin(userId: number | undefined) {
+function isMainAdmin(userId: number | undefined) {
   return userId === ADMIN_ID;
+}
+async function isAdmin(userId: number | undefined): Promise<boolean> {
+  if (!userId) return false;
+  return isUserAdmin(userId, ADMIN_ID);
 }
 
 function extractTitle(msg: any): string {
@@ -186,7 +195,7 @@ async function handleMessage(msg: any) {
   const text: string = msg.text || "";
 
   // Admin multi-step flow
-  if (isAdmin(from.id)) {
+  if (await isAdmin(from.id)) {
     const st = await getAdminState(Number(from.id));
     if (st && !text.startsWith("/")) {
       return await handleAdminStateInput(chat.id, Number(from.id), st, msg);
@@ -204,7 +213,7 @@ async function handleMessage(msg: any) {
     return await sendStartMenu(chat.id, Number(from.id));
   }
 
-  if (text === "/admin" && isAdmin(from.id)) {
+  if (text === "/admin" && (await isAdmin(from.id))) {
     return await sendAdminPanel(chat.id);
   }
 
@@ -218,26 +227,30 @@ async function sendStartMenu(chatId: number, userId: number) {
   const settings = await getSettings();
   const me = await getMe();
   const text =
-    `👋 ברוך הבא לבוט חיפוש סרטים!\n\n` +
-    `🔍 שלח לי שם של סרט ואני אמצא לך אותו.\n` +
-    `💡 ניתן גם להוסיף אותי לקבוצות.\n\n` +
+    `🎬 <b>בוט חיפוש סרטים</b>\n\n` +
+    `🔍 כדי לחפש סרט — פשוט <b>שלח לי את שם הסרט</b> בהודעה כאן בצ׳אט.\n` +
+    `לדוגמה: <code>הארי פוטר</code> או <code>Inception</code>\n\n` +
+    `📥 אני אחזיר לך תוצאות מהמאגר. לחץ על השם של הסרט כדי לקבל אותו.\n` +
+    `📚 אם יש הרבה תוצאות — אפשר לדפדף בעמודים בעזרת הכפתורים למטה.\n\n` +
+    `💡 ניתן גם להוסיף אותי לקבוצות ולחפש שם.\n\n` +
     `נבנה על ידי @${settings.builder_username?.replace(/^@/, "") || "Hsshsusudjd"}`;
   const kb = startMenuKeyboard(settings, me.username);
-  if (isAdmin(userId)) {
+  if (await isAdmin(userId)) {
     kb.inline_keyboard.unshift([{ text: "⚙️ לוח אדמין", callback_data: "admin_open" }]);
   }
   await sendMessage(chatId, text, { reply_markup: kb });
 }
 
-async function sendAdminPanel(chatId: number) {
+async function sendAdminPanel(chatId: number, userId?: number) {
   const s = await stats();
+  const main = isMainAdmin(userId);
   const text =
-    `⚙️ <b>לוח אדמין</b>\n\n` +
+    `⚙️ <b>לוח אדמין</b>${main ? "" : " (זמני)"}\n\n` +
     `🎬 סרטים במאגר: <b>${s.movies.toLocaleString()}</b>\n` +
     `👤 משתמשים: <b>${s.users.toLocaleString()}</b>\n` +
     `👥 קבוצות: <b>${s.groups.toLocaleString()}</b>\n` +
     `⭐ סה״כ כוכבים: <b>${s.totalStars.toLocaleString()}</b>`;
-  await sendMessage(chatId, text, { reply_markup: adminPanelKeyboard() });
+  await sendMessage(chatId, text, { reply_markup: adminPanelKeyboard(main) });
 }
 
 // ───── Search & pagination ─────
@@ -298,13 +311,23 @@ async function handleCallback(cq: any) {
 
   if (data === "noop") return answerCallbackQuery(cq.id);
 
+  // Always ack pagination/get callbacks immediately so the spinner clears fast.
+  if (data.startsWith("pg_") || data.startsWith("get_")) {
+    answerCallbackQuery(cq.id).catch(() => {});
+  }
+
   if (data === "back_to_start") {
     await answerCallbackQuery(cq.id);
     const settings = await getSettings();
     const me = await getMe();
     const kb = startMenuKeyboard(settings, me.username);
-    if (isAdmin(from.id)) kb.inline_keyboard.unshift([{ text: "⚙️ לוח אדמין", callback_data: "admin_open" }]);
-    await editMessageText(chatId, msg.message_id, `👋 ברוך הבא! מה תרצה לעשות?`, { reply_markup: kb }).catch(() => {});
+    if (await isAdmin(from.id)) kb.inline_keyboard.unshift([{ text: "⚙️ לוח אדמין", callback_data: "admin_open" }]);
+    await editMessageText(
+      chatId,
+      msg.message_id,
+      `🎬 <b>בוט חיפוש סרטים</b>\n\n🔍 שלח לי את שם הסרט שאתה מחפש ואני אחזיר לך תוצאות.`,
+      { reply_markup: kb },
+    ).catch(() => {});
     return;
   }
 
@@ -339,7 +362,6 @@ async function handleCallback(cq: any) {
 
   if (data.startsWith("get_")) {
     const movieId = Number(data.slice(4));
-    await answerCallbackQuery(cq.id);
     await serveMovie(chatId, from.id, movieId);
     return;
   }
@@ -368,7 +390,6 @@ async function handleCallback(cq: any) {
     const enc = rest.slice(0, idx);
     const page = Number(rest.slice(idx + 1));
     const q = decodeQuery(enc);
-    await answerCallbackQuery(cq.id);
     const inGroup = msg.chat.type !== "private";
     await runSearchAndRespond(chatId, from.id, q, page, msg.message_id, inGroup);
     return;
@@ -376,7 +397,7 @@ async function handleCallback(cq: any) {
 
   // Admin callbacks
   if (data.startsWith("admin_")) {
-    if (!isAdmin(from.id)) return answerCallbackQuery(cq.id, { text: "❌ אין הרשאה", show_alert: true });
+    if (!(await isAdmin(from.id))) return answerCallbackQuery(cq.id, { text: "❌ אין הרשאה", show_alert: true });
     return await handleAdminCallback(cq, data);
   }
 
@@ -388,11 +409,19 @@ async function handleAdminCallback(cq: any, data: string) {
   const chatId = cq.message.chat.id;
   const messageId = cq.message.message_id;
   const userId = cq.from.id;
+  const main = isMainAdmin(userId);
   await answerCallbackQuery(cq.id);
+
+  // Main-admin-only actions
+  if (!main && (data === "admin_set_required" || data === "admin_manage" || data === "admin_add" || data.startsWith("admin_rm_"))) {
+    return;
+  }
 
   switch (data) {
     case "admin_open":
-      return await editMessageText(chatId, messageId, "⚙️ <b>לוח אדמין</b>", { reply_markup: adminPanelKeyboard() }).catch(() => {});
+      return await editMessageText(chatId, messageId, `⚙️ <b>לוח אדמין</b>${main ? "" : " (זמני)"}`, {
+        reply_markup: adminPanelKeyboard(main),
+      }).catch(() => {});
     case "admin_close":
       return await tg("deleteMessage", { chat_id: chatId, message_id: messageId }).catch(() => {});
     case "admin_stats": {
@@ -434,6 +463,53 @@ async function handleAdminCallback(cq: any, data: string) {
     case "admin_bc_all":
       await setAdminState(userId, "awaiting_broadcast", { target: "all" });
       return await sendMessage(chatId, "✏️ שלח את ההודעה לשידור <b>לכולם</b> (בקבוצות תוצמד אוטומטית).\nשלח /cancel לביטול.");
+    case "admin_manage": {
+      const admins = await listAdmins();
+      const lines = admins.length
+        ? admins
+            .map((a: any) => {
+              const exp = a.expires_at
+                ? `עד ${new Date(a.expires_at).toLocaleString("he-IL")}`
+                : "קבוע";
+              return `• <code>${a.telegram_id}</code> — ${exp}`;
+            })
+            .join("\n")
+        : "<i>אין אדמינים זמניים כרגע.</i>";
+      return await editMessageText(
+        chatId,
+        messageId,
+        `👥 <b>ניהול אדמינים</b>\n\n${lines}\n\nלחיצה על כפתור עם ❌ תסיר את האדמין.`,
+        { reply_markup: adminsListKeyboard(admins as any) },
+      ).catch(() => {});
+    }
+    case "admin_add":
+      await setAdminState(userId, "awaiting_admin_add");
+      return await sendMessage(
+        chatId,
+        "➕ שלח את <b>ה-ID של המשתמש</b> ואת מספר הימים, בפורמט:\n\n" +
+          "<code>123456789 7</code> — אדמין למשך 7 ימים\n" +
+          "<code>123456789 0</code> — אדמין קבוע\n\n" +
+          "שלח /cancel לביטול.",
+      );
+  }
+  if (data.startsWith("admin_rm_")) {
+    const tid = Number(data.slice("admin_rm_".length));
+    await removeAdmin(tid);
+    const admins = await listAdmins();
+    const lines = admins.length
+      ? admins
+          .map((a: any) => {
+            const exp = a.expires_at ? `עד ${new Date(a.expires_at).toLocaleString("he-IL")}` : "קבוע";
+            return `• <code>${a.telegram_id}</code> — ${exp}`;
+          })
+          .join("\n")
+      : "<i>אין אדמינים זמניים כרגע.</i>";
+    return await editMessageText(
+      chatId,
+      messageId,
+      `👥 <b>ניהול אדמינים</b>\n\n${lines}\n\n✅ הוסר: <code>${tid}</code>`,
+      { reply_markup: adminsListKeyboard(admins as any) },
+    ).catch(() => {});
   }
 }
 
@@ -497,6 +573,28 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
     await setAdminState(userId, null);
     await sendMessage(chatId, "🚀 מתחיל שידור...");
     runBroadcast(chatId, userId, target, msg).catch((e) => console.error("broadcast error:", e));
+    return;
+  }
+
+  if (st.state === "awaiting_admin_add") {
+    if (!isMainAdmin(userId)) {
+      await setAdminState(userId, null);
+      return;
+    }
+    const parts = text.split(/\s+/);
+    const tid = Number(parts[0]);
+    const days = Number(parts[1] ?? "0");
+    if (!Number.isFinite(tid) || tid <= 0) {
+      await sendMessage(chatId, "❌ ID לא חוקי. נסה שוב או /cancel.");
+      return;
+    }
+    const expires_at = days > 0 ? new Date(Date.now() + days * 86400_000).toISOString() : null;
+    await addAdmin({ telegram_id: tid, added_by: userId, expires_at });
+    await setAdminState(userId, null);
+    await sendMessage(
+      chatId,
+      `✅ <code>${tid}</code> נוסף כאדמין${expires_at ? ` עד <b>${new Date(expires_at).toLocaleString("he-IL")}</b>` : " <b>קבוע</b>"}.`,
+    );
     return;
   }
 }

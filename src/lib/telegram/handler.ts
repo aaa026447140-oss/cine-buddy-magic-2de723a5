@@ -213,6 +213,10 @@ async function handleMessage(msg: any) {
     return await sendStartMenu(chat.id, Number(from.id));
   }
 
+  if (text === "/stats") {
+    return await sendStats(chat.id, Number(from.id));
+  }
+
   if (text === "/admin" && (await isAdmin(from.id))) {
     return await sendAdminPanel(chat.id, Number(from.id));
   }
@@ -221,6 +225,16 @@ async function handleMessage(msg: any) {
   if (text && !text.startsWith("/")) {
     return await runSearchAndRespond(chat.id, Number(from.id), text, 0, null, false);
   }
+}
+
+async function sendStats(chatId: number, userId?: number) {
+  const s = await stats();
+  const text =
+    `📊 <b>סטטיסטיקת המאגר</b>\n\n` +
+    `🎬 סרטים במאגר: <b>${s.movies.toLocaleString()}</b>\n` +
+    `👤 משתמשים: <b>${s.users.toLocaleString()}</b>\n` +
+    `👥 קבוצות: <b>${s.groups.toLocaleString()}</b>`;
+  await sendMessage(chatId, text, { reply_markup: { inline_keyboard: [[{ text: "« חזרה", callback_data: "back_to_start" }]] } });
 }
 
 async function sendStartMenu(chatId: number, userId: number) {
@@ -310,6 +324,12 @@ async function handleCallback(cq: any) {
   const chatId = msg.chat.id;
 
   if (data === "noop") return answerCallbackQuery(cq.id);
+
+  if (data === "show_stats") {
+    await answerCallbackQuery(cq.id);
+    await sendStats(chatId, from.id);
+    return;
+  }
 
   // Always ack pagination/get callbacks immediately so the spinner clears fast.
   if (data.startsWith("pg_") || data.startsWith("get_")) {

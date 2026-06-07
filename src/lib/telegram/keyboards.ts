@@ -3,6 +3,9 @@ import type { BotSettings } from "./db";
 
 export function startMenuKeyboard(s: BotSettings, botUsername: string) {
   const rows: any[][] = [];
+  rows.push([
+    { text: "📊 כמה סרטים יש במאגר?", callback_data: "show_stats" },
+  ]);
   if (s.updates_channel_url || s.required_channel_invite_link) {
     rows.push([{ text: "📢 ערוץ עדכונים", url: s.updates_channel_url || s.required_channel_invite_link || "" }]);
   }

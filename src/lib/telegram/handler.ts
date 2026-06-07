@@ -214,7 +214,7 @@ async function handleMessage(msg: any) {
   }
 
   if (text === "/admin" && (await isAdmin(from.id))) {
-    return await sendAdminPanel(chat.id);
+    return await sendAdminPanel(chat.id, Number(from.id));
   }
 
   // Free-text search in private

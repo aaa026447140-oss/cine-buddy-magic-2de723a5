@@ -14,13 +14,238 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      admin_state: {
+        Row: {
+          data: Json | null
+          state: string | null
+          telegram_id: number
+          updated_at: string
+        }
+        Insert: {
+          data?: Json | null
+          state?: string | null
+          telegram_id: number
+          updated_at?: string
+        }
+        Update: {
+          data?: Json | null
+          state?: string | null
+          telegram_id?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      bot_groups: {
+        Row: {
+          added_at: string
+          chat_id: number
+          is_active: boolean
+          last_seen: string
+          title: string | null
+          type: string | null
+        }
+        Insert: {
+          added_at?: string
+          chat_id: number
+          is_active?: boolean
+          last_seen?: string
+          title?: string | null
+          type?: string | null
+        }
+        Update: {
+          added_at?: string
+          chat_id?: number
+          is_active?: boolean
+          last_seen?: string
+          title?: string | null
+          type?: string | null
+        }
+        Relationships: []
+      }
+      bot_settings: {
+        Row: {
+          builder_username: string | null
+          id: number
+          required_channel_id: number | null
+          required_channel_invite_link: string | null
+          required_channel_title: string | null
+          required_channel_username: string | null
+          source_channel_id: number | null
+          source_channel_title: string | null
+          source_channel_username: string | null
+          support_chat_url: string | null
+          updated_at: string
+          updates_channel_url: string | null
+        }
+        Insert: {
+          builder_username?: string | null
+          id?: number
+          required_channel_id?: number | null
+          required_channel_invite_link?: string | null
+          required_channel_title?: string | null
+          required_channel_username?: string | null
+          source_channel_id?: number | null
+          source_channel_title?: string | null
+          source_channel_username?: string | null
+          support_chat_url?: string | null
+          updated_at?: string
+          updates_channel_url?: string | null
+        }
+        Update: {
+          builder_username?: string | null
+          id?: number
+          required_channel_id?: number | null
+          required_channel_invite_link?: string | null
+          required_channel_title?: string | null
+          required_channel_username?: string | null
+          source_channel_id?: number | null
+          source_channel_title?: string | null
+          source_channel_username?: string | null
+          support_chat_url?: string | null
+          updated_at?: string
+          updates_channel_url?: string | null
+        }
+        Relationships: []
+      }
+      bot_users: {
+        Row: {
+          first_name: string | null
+          first_seen: string
+          is_blocked: boolean
+          language_code: string | null
+          last_name: string | null
+          last_seen: string
+          telegram_id: number
+          username: string | null
+        }
+        Insert: {
+          first_name?: string | null
+          first_seen?: string
+          is_blocked?: boolean
+          language_code?: string | null
+          last_name?: string | null
+          last_seen?: string
+          telegram_id: number
+          username?: string | null
+        }
+        Update: {
+          first_name?: string | null
+          first_seen?: string
+          is_blocked?: boolean
+          language_code?: string | null
+          last_name?: string | null
+          last_seen?: string
+          telegram_id?: number
+          username?: string | null
+        }
+        Relationships: []
+      }
+      broadcast_log: {
+        Row: {
+          created_at: string
+          failed: number
+          id: number
+          message_text: string | null
+          sent: number
+          target: string
+          total: number
+        }
+        Insert: {
+          created_at?: string
+          failed?: number
+          id?: number
+          message_text?: string | null
+          sent?: number
+          target: string
+          total?: number
+        }
+        Update: {
+          created_at?: string
+          failed?: number
+          id?: number
+          message_text?: string | null
+          sent?: number
+          target?: string
+          total?: number
+        }
+        Relationships: []
+      }
+      movies: {
+        Row: {
+          created_at: string
+          duration: number | null
+          file_size: number | null
+          file_type: string | null
+          file_unique_id: string | null
+          id: number
+          message_id: number
+          raw_caption: string | null
+          source_channel_id: number
+          title: string
+        }
+        Insert: {
+          created_at?: string
+          duration?: number | null
+          file_size?: number | null
+          file_type?: string | null
+          file_unique_id?: string | null
+          id?: number
+          message_id: number
+          raw_caption?: string | null
+          source_channel_id: number
+          title: string
+        }
+        Update: {
+          created_at?: string
+          duration?: number | null
+          file_size?: number | null
+          file_type?: string | null
+          file_unique_id?: string | null
+          id?: number
+          message_id?: number
+          raw_caption?: string | null
+          source_channel_id?: number
+          title?: string
+        }
+        Relationships: []
+      }
+      star_payments: {
+        Row: {
+          created_at: string
+          id: number
+          payload: string | null
+          stars_amount: number
+          telegram_payment_charge_id: string | null
+          telegram_provider_charge_id: string | null
+          telegram_user_id: number
+        }
+        Insert: {
+          created_at?: string
+          id?: number
+          payload?: string | null
+          stars_amount: number
+          telegram_payment_charge_id?: string | null
+          telegram_provider_charge_id?: string | null
+          telegram_user_id: number
+        }
+        Update: {
+          created_at?: string
+          id?: number
+          payload?: string | null
+          stars_amount?: number
+          telegram_payment_charge_id?: string | null
+          telegram_provider_charge_id?: string | null
+          telegram_user_id?: number
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      show_limit: { Args: never; Returns: number }
+      show_trgm: { Args: { "": string }; Returns: string[] }
     }
     Enums: {
       [_ in never]: never

@@ -17,8 +17,13 @@ export const Route = createFileRoute("/api/public/telegram/webhook")({
         } catch {
           return new Response("Bad Request", { status: 400 });
         }
-        // Process and respond quickly. We don't await long-running broadcast loops here.
-        handleUpdate(update).catch((e) => console.error("update err:", e));
+        // Must await — in the Worker runtime, detached promises are cancelled
+        // when the response is returned, so /start etc. never get processed.
+        try {
+          await handleUpdate(update);
+        } catch (e) {
+          console.error("update err:", e);
+        }
         return new Response("ok");
       },
       GET: async () => new Response("Telegram webhook endpoint", { status: 200 }),

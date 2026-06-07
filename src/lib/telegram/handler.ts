@@ -227,17 +227,23 @@ async function handleMessage(msg: any) {
   }
 }
 
-async function sendStats(chatId: number, userId?: number) {
+async function buildStatsView() {
   const s = await stats();
   const text =
     `📊 <b>סטטיסטיקת המאגר</b>\n\n` +
     `🎬 סרטים במאגר: <b>${s.movies.toLocaleString()}</b>\n` +
     `👤 משתמשים: <b>${s.users.toLocaleString()}</b>\n` +
     `👥 קבוצות: <b>${s.groups.toLocaleString()}</b>`;
-  await sendMessage(chatId, text, { reply_markup: { inline_keyboard: [[{ text: "« חזרה", callback_data: "back_to_start" }]] } });
+  const reply_markup = { inline_keyboard: [[{ text: "« חזרה", callback_data: "back_to_start" }]] };
+  return { text, reply_markup };
 }
 
-async function sendStartMenu(chatId: number, userId: number) {
+async function sendStats(chatId: number, _userId?: number) {
+  const v = await buildStatsView();
+  await sendMessage(chatId, v.text, { reply_markup: v.reply_markup });
+}
+
+async function buildStartView(userId: number) {
   const settings = await getSettings();
   const me = await getMe();
   const text =
@@ -252,7 +258,12 @@ async function sendStartMenu(chatId: number, userId: number) {
   if (await isAdmin(userId)) {
     kb.inline_keyboard.unshift([{ text: "⚙️ לוח אדמין", callback_data: "admin_open" }]);
   }
-  await sendMessage(chatId, text, { reply_markup: kb });
+  return { text, reply_markup: kb };
+}
+
+async function sendStartMenu(chatId: number, userId: number) {
+  const v = await buildStartView(userId);
+  await sendMessage(chatId, v.text, { reply_markup: v.reply_markup });
 }
 
 async function sendAdminPanel(chatId: number, userId?: number) {
@@ -327,7 +338,8 @@ async function handleCallback(cq: any) {
 
   if (data === "show_stats") {
     await answerCallbackQuery(cq.id);
-    await sendStats(chatId, from.id);
+    const v = await buildStatsView();
+    await editMessageText(chatId, msg.message_id, v.text, { reply_markup: v.reply_markup }).catch(() => {});
     return;
   }
 
@@ -338,16 +350,8 @@ async function handleCallback(cq: any) {
 
   if (data === "back_to_start") {
     await answerCallbackQuery(cq.id);
-    const settings = await getSettings();
-    const me = await getMe();
-    const kb = startMenuKeyboard(settings, me.username);
-    if (await isAdmin(from.id)) kb.inline_keyboard.unshift([{ text: "⚙️ לוח אדמין", callback_data: "admin_open" }]);
-    await editMessageText(
-      chatId,
-      msg.message_id,
-      `🎬 <b>בוט חיפוש סרטים</b>\n\n🔍 שלח לי את שם הסרט שאתה מחפש ואני אחזיר לך תוצאות.`,
-      { reply_markup: kb },
-    ).catch(() => {});
+    const v = await buildStartView(from.id);
+    await editMessageText(chatId, msg.message_id, v.text, { reply_markup: v.reply_markup }).catch(() => {});
     return;
   }
 

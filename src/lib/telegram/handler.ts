@@ -325,6 +325,12 @@ async function handleCallback(cq: any) {
 
   if (data === "noop") return answerCallbackQuery(cq.id);
 
+  if (data === "show_stats") {
+    await answerCallbackQuery(cq.id);
+    await sendStats(chatId, from.id);
+    return;
+  }
+
   // Always ack pagination/get callbacks immediately so the spinner clears fast.
   if (data.startsWith("pg_") || data.startsWith("get_")) {
     answerCallbackQuery(cq.id).catch(() => {});

@@ -162,3 +162,35 @@ export async function stats() {
   const totalStars = (payments ?? []).reduce((s: number, p: any) => s + (p.stars_amount || 0), 0);
   return { movies: movies ?? 0, users: users ?? 0, groups: groups ?? 0, totalStars };
 }
+
+// ───── Admin management ─────
+export async function isUserAdmin(telegram_id: number, mainAdminId: number): Promise<boolean> {
+  if (telegram_id === mainAdminId) return true;
+  const { data } = await admin()
+    .from("bot_admins")
+    .select("telegram_id,expires_at")
+    .eq("telegram_id", telegram_id)
+    .maybeSingle();
+  if (!data) return false;
+  if (data.expires_at && new Date(data.expires_at as any).getTime() < Date.now()) {
+    await admin().from("bot_admins").delete().eq("telegram_id", telegram_id);
+    return false;
+  }
+  return true;
+}
+
+export async function listAdmins() {
+  const { data } = await admin()
+    .from("bot_admins")
+    .select("telegram_id,expires_at,note,added_by,created_at")
+    .order("created_at", { ascending: false });
+  return data ?? [];
+}
+
+export async function addAdmin(p: { telegram_id: number; added_by: number; expires_at: string | null; note?: string | null }) {
+  await admin().from("bot_admins").upsert(p as any, { onConflict: "telegram_id" });
+}
+
+export async function removeAdmin(telegram_id: number) {
+  await admin().from("bot_admins").delete().eq("telegram_id", telegram_id);
+}

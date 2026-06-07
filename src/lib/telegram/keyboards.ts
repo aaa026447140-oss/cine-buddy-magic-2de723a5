@@ -61,18 +61,35 @@ export function subscribeRequiredKeyboard(inviteUrl: string, recheckPayload: str
   };
 }
 
-export function adminPanelKeyboard() {
-  return {
-    inline_keyboard: [
-      [{ text: "🎬 הגדרת ערוץ סרטים", callback_data: "admin_set_source" }],
-      [{ text: "🔒 הגדרת ערוץ חובה", callback_data: "admin_set_required" }],
-      [{ text: "📊 סטטיסטיקות", callback_data: "admin_stats" }],
-      [{ text: "📣 שידור לפרטיים", callback_data: "admin_bc_private" }],
-      [{ text: "📣 שידור לקבוצות", callback_data: "admin_bc_groups" }],
-      [{ text: "📣 שידור לכולם", callback_data: "admin_bc_all" }],
-      [{ text: "« סגור", callback_data: "admin_close" }],
-    ],
-  };
+export function adminPanelKeyboard(isMain: boolean) {
+  const rows: any[][] = [
+    [{ text: "🎬 הגדרת ערוץ סרטים", callback_data: "admin_set_source" }],
+  ];
+  if (isMain) {
+    rows.push([{ text: "🔒 הגדרת ערוץ חובה", callback_data: "admin_set_required" }]);
+  }
+  rows.push([{ text: "📊 סטטיסטיקות", callback_data: "admin_stats" }]);
+  rows.push([{ text: "📣 שידור לפרטיים", callback_data: "admin_bc_private" }]);
+  rows.push([{ text: "📣 שידור לקבוצות", callback_data: "admin_bc_groups" }]);
+  rows.push([{ text: "📣 שידור לכולם", callback_data: "admin_bc_all" }]);
+  if (isMain) {
+    rows.push([{ text: "👥 ניהול אדמינים", callback_data: "admin_manage" }]);
+  }
+  rows.push([{ text: "« סגור", callback_data: "admin_close" }]);
+  return { inline_keyboard: rows };
+}
+
+export function adminsListKeyboard(admins: { telegram_id: number; expires_at: string | null }[]) {
+  const rows: any[][] = [];
+  for (const a of admins) {
+    const label = a.expires_at
+      ? `❌ ${a.telegram_id} · עד ${new Date(a.expires_at).toLocaleDateString("he-IL")}`
+      : `❌ ${a.telegram_id} · קבוע`;
+    rows.push([{ text: label, callback_data: `admin_rm_${a.telegram_id}` }]);
+  }
+  rows.push([{ text: "➕ הוסף אדמין", callback_data: "admin_add" }]);
+  rows.push([{ text: "« חזרה", callback_data: "admin_open" }]);
+  return { inline_keyboard: rows };
 }
 
 function truncate(s: string, n: number) {

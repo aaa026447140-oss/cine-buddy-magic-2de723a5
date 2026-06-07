@@ -1,0 +1,164 @@
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+
+let _admin: SupabaseClient | null = null;
+export function admin(): SupabaseClient {
+  if (_admin) return _admin;
+  const url = process.env.SUPABASE_URL!;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  _admin = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+  return _admin;
+}
+
+export interface BotSettings {
+  id: number;
+  source_channel_id: number | null;
+  source_channel_username: string | null;
+  source_channel_title: string | null;
+  required_channel_id: number | null;
+  required_channel_username: string | null;
+  required_channel_title: string | null;
+  required_channel_invite_link: string | null;
+  updates_channel_url: string | null;
+  support_chat_url: string | null;
+  builder_username: string | null;
+}
+
+export async function getSettings(): Promise<BotSettings> {
+  const { data, error } = await admin().from("bot_settings").select("*").eq("id", 1).single();
+  if (error) throw error;
+  return data as any;
+}
+
+export async function updateSettings(patch: Partial<BotSettings>) {
+  const { error } = await admin()
+    .from("bot_settings")
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq("id", 1);
+  if (error) throw error;
+}
+
+export async function upsertUser(u: {
+  id: number;
+  username?: string;
+  first_name?: string;
+  last_name?: string;
+  language_code?: string;
+}) {
+  await admin().from("bot_users").upsert(
+    {
+      telegram_id: u.id,
+      username: u.username ?? null,
+      first_name: u.first_name ?? null,
+      last_name: u.last_name ?? null,
+      language_code: u.language_code ?? null,
+      last_seen: new Date().toISOString(),
+    },
+    { onConflict: "telegram_id" },
+  );
+}
+
+export async function upsertGroup(c: { id: number; title?: string; type?: string }) {
+  await admin().from("bot_groups").upsert(
+    {
+      chat_id: c.id,
+      title: c.title ?? null,
+      type: c.type ?? null,
+      is_active: true,
+      last_seen: new Date().toISOString(),
+    },
+    { onConflict: "chat_id" },
+  );
+}
+
+export async function markGroupInactive(chat_id: number) {
+  await admin().from("bot_groups").update({ is_active: false }).eq("chat_id", chat_id);
+}
+
+export async function markUserBlocked(telegram_id: number) {
+  await admin().from("bot_users").update({ is_blocked: true }).eq("telegram_id", telegram_id);
+}
+
+export async function indexMovie(m: {
+  source_channel_id: number;
+  message_id: number;
+  title: string;
+  file_unique_id?: string | null;
+  file_type?: string | null;
+  duration?: number | null;
+  file_size?: number | null;
+  raw_caption?: string | null;
+}) {
+  await admin().from("movies").upsert(m as any, { onConflict: "source_channel_id,message_id" });
+}
+
+export async function searchMovies(query: string, page: number, pageSize: number) {
+  const q = query.trim();
+  if (!q) return { rows: [] as any[], total: 0 };
+  const from = page * pageSize;
+  const to = from + pageSize - 1;
+  // ILIKE search; multi-word: split and AND them.
+  const words = q.split(/\s+/).filter(Boolean).slice(0, 6);
+  let req = admin().from("movies").select("id,title,message_id,source_channel_id", { count: "exact" });
+  for (const w of words) {
+    const esc = w.replace(/[%_]/g, "\\$&");
+    req = req.or(`title.ilike.%${esc}%,raw_caption.ilike.%${esc}%`);
+  }
+  req = req.order("id", { ascending: false }).range(from, to);
+  const { data, error, count } = await req;
+  if (error) throw error;
+  return { rows: data ?? [], total: count ?? 0 };
+}
+
+export async function getMovieById(id: number) {
+  const { data, error } = await admin().from("movies").select("*").eq("id", id).single();
+  if (error) return null;
+  return data;
+}
+
+export async function setAdminState(telegram_id: number, state: string | null, data: any = null) {
+  if (state === null) {
+    await admin().from("admin_state").delete().eq("telegram_id", telegram_id);
+    return;
+  }
+  await admin().from("admin_state").upsert(
+    { telegram_id, state, data, updated_at: new Date().toISOString() },
+    { onConflict: "telegram_id" },
+  );
+}
+
+export async function getAdminState(telegram_id: number): Promise<{ state: string; data: any } | null> {
+  const { data } = await admin().from("admin_state").select("state,data").eq("telegram_id", telegram_id).maybeSingle();
+  return (data as any) ?? null;
+}
+
+export async function recordPayment(p: {
+  telegram_user_id: number;
+  stars_amount: number;
+  telegram_payment_charge_id: string;
+  telegram_provider_charge_id: string;
+  payload: string;
+}) {
+  await admin().from("star_payments").insert(p).select().single();
+}
+
+export async function listGroups(): Promise<number[]> {
+  const { data } = await admin().from("bot_groups").select("chat_id").eq("is_active", true);
+  return (data ?? []).map((r: any) => Number(r.chat_id));
+}
+
+export async function listUsers(): Promise<number[]> {
+  const { data } = await admin().from("bot_users").select("telegram_id").eq("is_blocked", false);
+  return (data ?? []).map((r: any) => Number(r.telegram_id));
+}
+
+export async function stats() {
+  const a = admin();
+  const [{ count: movies }, { count: users }, { count: groups }, { data: payments }] = await Promise.all([
+    a.from("movies").select("*", { count: "exact", head: true }),
+    a.from("bot_users").select("*", { count: "exact", head: true }).eq("is_blocked", false),
+    a.from("bot_groups").select("*", { count: "exact", head: true }).eq("is_active", true),
+    a.from("star_payments").select("stars_amount"),
+  ]);
+  const totalStars = (payments ?? []).reduce((s: number, p: any) => s + (p.stars_amount || 0), 0);
+  return { movies: movies ?? 0, users: users ?? 0, groups: groups ?? 0, totalStars };
+}

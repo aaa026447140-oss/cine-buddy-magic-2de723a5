@@ -19,10 +19,12 @@ export const Route = createFileRoute("/api/public/telegram/webhook")({
         }
         // Must await — in the Worker runtime, detached promises are cancelled
         // when the response is returned, so /start etc. never get processed.
+        console.log("WEBHOOK_HIT", JSON.stringify({ keys: Object.keys(update), update_id: update.update_id }));
         try {
           await handleUpdate(update);
-        } catch (e) {
-          console.error("update err:", e);
+          console.log("WEBHOOK_OK", update.update_id);
+        } catch (e: any) {
+          console.error("update err:", e?.stack || e?.message || String(e));
         }
         return new Response("ok");
       },

@@ -1,0 +1,557 @@
+import {
+  answerCallbackQuery,
+  answerPreCheckoutQuery,
+  copyMessage,
+  editMessageText,
+  getChat,
+  getChatMember,
+  pinChatMessage,
+  sendInvoice,
+  sendMessage,
+  tg,
+} from "./api";
+import { ADMIN_ID, PAGE_SIZE, STAR_AMOUNTS } from "./constants";
+import {
+  getAdminState,
+  getMovieById,
+  getSettings,
+  indexMovie,
+  listGroups,
+  listUsers,
+  markGroupInactive,
+  markUserBlocked,
+  recordPayment,
+  searchMovies,
+  setAdminState,
+  stats,
+  updateSettings,
+  upsertGroup,
+  upsertUser,
+  type BotSettings,
+} from "./db";
+import {
+  adminPanelKeyboard,
+  decodeQuery,
+  encodeQuery,
+  resultsKeyboard,
+  startMenuKeyboard,
+  subscribeRequiredKeyboard,
+  supportMenuKeyboard,
+} from "./keyboards";
+
+let _me: { id: number; username: string } | null = null;
+async function getMe() {
+  if (_me) return _me;
+  const m: any = await tg("getMe");
+  _me = { id: m.id, username: m.username };
+  return _me;
+}
+
+function isAdmin(userId: number | undefined) {
+  return userId === ADMIN_ID;
+}
+
+function extractTitle(msg: any): string {
+  const cap = msg.caption || msg.text || "";
+  if (msg.video?.file_name) return cap || msg.video.file_name;
+  if (msg.document?.file_name) return cap || msg.document.file_name;
+  if (msg.audio?.title) return cap || msg.audio.title;
+  return cap || "";
+}
+
+function extractFile(msg: any) {
+  if (msg.video) return { file_unique_id: msg.video.file_unique_id, file_type: "video", duration: msg.video.duration, file_size: msg.video.file_size };
+  if (msg.document) return { file_unique_id: msg.document.file_unique_id, file_type: "document", duration: null, file_size: msg.document.file_size };
+  if (msg.audio) return { file_unique_id: msg.audio.file_unique_id, file_type: "audio", duration: msg.audio.duration, file_size: msg.audio.file_size };
+  if (msg.animation) return { file_unique_id: msg.animation.file_unique_id, file_type: "animation", duration: msg.animation.duration, file_size: msg.animation.file_size };
+  return null;
+}
+
+async function isSubscribed(userId: number, settings: BotSettings): Promise<boolean> {
+  if (!settings.required_channel_id) return true; // no required channel set
+  try {
+    const m: any = await getChatMember(settings.required_channel_id, userId);
+    return ["creator", "administrator", "member", "restricted"].includes(m.status);
+  } catch {
+    return false;
+  }
+}
+
+async function requireSubscriptionOrPrompt(
+  chatId: number,
+  userId: number,
+  settings: BotSettings,
+  recheckPayload: string,
+): Promise<boolean> {
+  if (await isSubscribed(userId, settings)) return true;
+  const inviteUrl =
+    settings.required_channel_invite_link ||
+    (settings.required_channel_username ? `https://t.me/${settings.required_channel_username}` : "");
+  await sendMessage(
+    chatId,
+    "🔒 כדי להשתמש בבוט עליך להיות מנוי לערוץ החובה שלנו.\n\nהצטרף ולחץ על «הצטרפתי, בדוק שוב».",
+    { reply_markup: subscribeRequiredKeyboard(inviteUrl, recheckPayload) },
+  );
+  return false;
+}
+
+// ───── Main entry ─────
+export async function handleUpdate(update: any) {
+  try {
+    if (update.message) return await handleMessage(update.message);
+    if (update.edited_message) return; // ignore edits
+    if (update.channel_post) return await handleChannelPost(update.channel_post);
+    if (update.callback_query) return await handleCallback(update.callback_query);
+    if (update.pre_checkout_query) return await handlePreCheckout(update.pre_checkout_query);
+    if (update.my_chat_member) return await handleMyChatMember(update.my_chat_member);
+  } catch (e: any) {
+    console.error("handleUpdate error:", e?.message || e);
+  }
+}
+
+// ───── Channel posts (auto-index new movies) ─────
+async function handleChannelPost(msg: any) {
+  const settings = await getSettings();
+  if (!settings.source_channel_id) return;
+  if (Number(msg.chat.id) !== Number(settings.source_channel_id)) return;
+  const file = extractFile(msg);
+  if (!file) return;
+  const title = extractTitle(msg);
+  if (!title) return;
+  await indexMovie({
+    source_channel_id: Number(msg.chat.id),
+    message_id: Number(msg.message_id),
+    title,
+    raw_caption: msg.caption || msg.text || null,
+    ...file,
+  });
+}
+
+// ───── my_chat_member: track group join/leave ─────
+async function handleMyChatMember(ev: any) {
+  const chat = ev.chat;
+  const newStatus = ev.new_chat_member?.status;
+  if (chat.type === "group" || chat.type === "supergroup") {
+    if (["left", "kicked"].includes(newStatus)) {
+      await markGroupInactive(Number(chat.id));
+    } else {
+      await upsertGroup({ id: Number(chat.id), title: chat.title, type: chat.type });
+    }
+  }
+}
+
+// ───── Messages ─────
+async function handleMessage(msg: any) {
+  const chat = msg.chat;
+  const from = msg.from;
+  if (!from) return;
+
+  // Group: track membership and handle search by text
+  if (chat.type === "group" || chat.type === "supergroup") {
+    await upsertGroup({ id: Number(chat.id), title: chat.title, type: chat.type });
+    if (msg.text) {
+      // Treat any text starting with "?" or any text that isn't a command as a search.
+      const text = msg.text.trim();
+      if (text.startsWith("/")) return; // ignore commands in groups
+      if (text.length < 2) return;
+      await runSearchAndRespond(chat.id, from.id, text, 0, null, true);
+    }
+    return;
+  }
+
+  // Private chat
+  if (chat.type !== "private") return;
+  await upsertUser({
+    id: Number(from.id),
+    username: from.username,
+    first_name: from.first_name,
+    last_name: from.last_name,
+    language_code: from.language_code,
+  });
+
+  // Successful payment notification
+  if (msg.successful_payment) {
+    const sp = msg.successful_payment;
+    await recordPayment({
+      telegram_user_id: Number(from.id),
+      stars_amount: Number(sp.total_amount),
+      telegram_payment_charge_id: sp.telegram_payment_charge_id,
+      telegram_provider_charge_id: sp.provider_payment_charge_id || "",
+      payload: sp.invoice_payload,
+    });
+    await sendMessage(chat.id, `🙏 תודה רבה על התמיכה! קיבלנו ${sp.total_amount} ⭐`);
+    return;
+  }
+
+  const text: string = msg.text || "";
+
+  // Admin multi-step flow
+  if (isAdmin(from.id)) {
+    const st = await getAdminState(Number(from.id));
+    if (st && !text.startsWith("/")) {
+      return await handleAdminStateInput(chat.id, Number(from.id), st, msg);
+    }
+  }
+
+  // /start with optional payload
+  if (text.startsWith("/start")) {
+    const parts = text.split(/\s+/);
+    const payload = parts[1] || "";
+    if (payload.startsWith("m_")) {
+      const movieId = Number(payload.slice(2));
+      return await serveMovie(chat.id, Number(from.id), movieId);
+    }
+    return await sendStartMenu(chat.id, Number(from.id));
+  }
+
+  if (text === "/admin" && isAdmin(from.id)) {
+    return await sendAdminPanel(chat.id);
+  }
+
+  // Free-text search in private
+  if (text && !text.startsWith("/")) {
+    return await runSearchAndRespond(chat.id, Number(from.id), text, 0, null, false);
+  }
+}
+
+async function sendStartMenu(chatId: number, userId: number) {
+  const settings = await getSettings();
+  const me = await getMe();
+  const text =
+    `👋 ברוך הבא לבוט חיפוש סרטים!\n\n` +
+    `🔍 שלח לי שם של סרט ואני אמצא לך אותו.\n` +
+    `💡 ניתן גם להוסיף אותי לקבוצות.\n\n` +
+    `נבנה על ידי @${settings.builder_username?.replace(/^@/, "") || "Hsshsusudjd"}`;
+  const kb = startMenuKeyboard(settings, me.username);
+  if (isAdmin(userId)) {
+    kb.inline_keyboard.unshift([{ text: "⚙️ לוח אדמין", callback_data: "admin_open" }]);
+  }
+  await sendMessage(chatId, text, { reply_markup: kb });
+}
+
+async function sendAdminPanel(chatId: number) {
+  const s = await stats();
+  const text =
+    `⚙️ <b>לוח אדמין</b>\n\n` +
+    `🎬 סרטים במאגר: <b>${s.movies.toLocaleString()}</b>\n` +
+    `👤 משתמשים: <b>${s.users.toLocaleString()}</b>\n` +
+    `👥 קבוצות: <b>${s.groups.toLocaleString()}</b>\n` +
+    `⭐ סה״כ כוכבים: <b>${s.totalStars.toLocaleString()}</b>`;
+  await sendMessage(chatId, text, { reply_markup: adminPanelKeyboard() });
+}
+
+// ───── Search & pagination ─────
+async function runSearchAndRespond(
+  chatId: number,
+  userId: number,
+  query: string,
+  page: number,
+  editMessageId: number | null,
+  inGroup: boolean,
+) {
+  const me = await getMe();
+  const { rows, total } = await searchMovies(query, page, PAGE_SIZE);
+  if (total === 0) {
+    const txt = `❌ לא נמצאו תוצאות עבור: <b>${escapeHtml(query)}</b>`;
+    if (editMessageId) await editMessageText(chatId, editMessageId, txt).catch(() => {});
+    else await sendMessage(chatId, txt);
+    return;
+  }
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+  const header = `🔎 תוצאות עבור: <b>${escapeHtml(query)}</b>\nנמצאו ${total.toLocaleString()} תוצאות${totalPages > 1 ? ` · עמוד ${page + 1}/${totalPages}` : ""}`;
+  const kb = resultsKeyboard(rows as any, page, totalPages, query, me.username, inGroup);
+  if (editMessageId) {
+    await editMessageText(chatId, editMessageId, header, { reply_markup: kb }).catch(() => {});
+  } else {
+    await sendMessage(chatId, header, { reply_markup: kb });
+  }
+}
+
+async function serveMovie(chatId: number, userId: number, movieId: number) {
+  const settings = await getSettings();
+  const ok = await requireSubscriptionOrPrompt(chatId, userId, settings, `m_${movieId}`);
+  if (!ok) return;
+  const movie: any = await getMovieById(movieId);
+  if (!movie) {
+    await sendMessage(chatId, "❌ הסרט לא נמצא במאגר.");
+    return;
+  }
+  try {
+    // copyMessage strips the original sender attribution — clean delivery.
+    await copyMessage(chatId, movie.source_channel_id, movie.message_id);
+  } catch (e: any) {
+    console.error("copyMessage failed:", e?.message);
+    await sendMessage(chatId, "❌ לא הצלחתי לשלוח את הסרט. ייתכן שהוא הוסר מהערוץ המקור.");
+  }
+}
+
+// ───── Callbacks ─────
+async function handleCallback(cq: any) {
+  const data: string = cq.data || "";
+  const from = cq.from;
+  const msg = cq.message;
+  if (!msg) {
+    await answerCallbackQuery(cq.id);
+    return;
+  }
+  const chatId = msg.chat.id;
+
+  if (data === "noop") return answerCallbackQuery(cq.id);
+
+  if (data === "back_to_start") {
+    await answerCallbackQuery(cq.id);
+    const settings = await getSettings();
+    const me = await getMe();
+    const kb = startMenuKeyboard(settings, me.username);
+    if (isAdmin(from.id)) kb.inline_keyboard.unshift([{ text: "⚙️ לוח אדמין", callback_data: "admin_open" }]);
+    await editMessageText(chatId, msg.message_id, `👋 ברוך הבא! מה תרצה לעשות?`, { reply_markup: kb }).catch(() => {});
+    return;
+  }
+
+  if (data === "support_menu") {
+    await answerCallbackQuery(cq.id);
+    await editMessageText(
+      chatId,
+      msg.message_id,
+      `❤️ <b>תמיכה בבוט</b>\n\nתודה רבה על השיקול לתמוך! בחר את סכום הכוכבים:`,
+      { reply_markup: supportMenuKeyboard() },
+    ).catch(() => {});
+    return;
+  }
+
+  if (data.startsWith("donate_")) {
+    const amount = parseInt(data.slice("donate_".length), 10);
+    if (!STAR_AMOUNTS.includes(amount)) return answerCallbackQuery(cq.id, { text: "סכום לא חוקי", show_alert: true });
+    await answerCallbackQuery(cq.id);
+    await sendInvoice({
+      chat_id: chatId,
+      title: `תמיכה בבוט · ${amount} כוכבים`,
+      description: `תרומה של ${amount} כוכבי טלגרם לבוט. תודה רבה ❤️`,
+      payload: `donate:${from.id}:${amount}:${Date.now()}`,
+      currency: "XTR",
+      prices: [{ label: `${amount} Stars`, amount }],
+    }).catch((e: any) => {
+      console.error("sendInvoice failed:", e?.message);
+      sendMessage(chatId, "❌ לא הצלחתי לפתוח חלון תשלום. נסה שוב מאוחר יותר.");
+    });
+    return;
+  }
+
+  if (data.startsWith("get_")) {
+    const movieId = Number(data.slice(4));
+    await answerCallbackQuery(cq.id);
+    await serveMovie(chatId, from.id, movieId);
+    return;
+  }
+
+  if (data.startsWith("check_")) {
+    const payload = data.slice("check_".length);
+    const settings = await getSettings();
+    if (await isSubscribed(from.id, settings)) {
+      await answerCallbackQuery(cq.id, { text: "✅ אומת! שולח..." });
+      // delete the prompt
+      await tg("deleteMessage", { chat_id: chatId, message_id: msg.message_id }).catch(() => {});
+      if (payload.startsWith("m_")) {
+        const movieId = Number(payload.slice(2));
+        await serveMovie(chatId, from.id, movieId);
+      }
+    } else {
+      await answerCallbackQuery(cq.id, { text: "❌ עדיין לא הצטרפת לערוץ", show_alert: true });
+    }
+    return;
+  }
+
+  if (data.startsWith("pg_")) {
+    // pg_<encodedQuery>_<page>
+    const rest = data.slice(3);
+    const idx = rest.lastIndexOf("_");
+    const enc = rest.slice(0, idx);
+    const page = Number(rest.slice(idx + 1));
+    const q = decodeQuery(enc);
+    await answerCallbackQuery(cq.id);
+    const inGroup = msg.chat.type !== "private";
+    await runSearchAndRespond(chatId, from.id, q, page, msg.message_id, inGroup);
+    return;
+  }
+
+  // Admin callbacks
+  if (data.startsWith("admin_")) {
+    if (!isAdmin(from.id)) return answerCallbackQuery(cq.id, { text: "❌ אין הרשאה", show_alert: true });
+    return await handleAdminCallback(cq, data);
+  }
+
+  await answerCallbackQuery(cq.id);
+}
+
+// ───── Admin ─────
+async function handleAdminCallback(cq: any, data: string) {
+  const chatId = cq.message.chat.id;
+  const messageId = cq.message.message_id;
+  const userId = cq.from.id;
+  await answerCallbackQuery(cq.id);
+
+  switch (data) {
+    case "admin_open":
+      return await editMessageText(chatId, messageId, "⚙️ <b>לוח אדמין</b>", { reply_markup: adminPanelKeyboard() }).catch(() => {});
+    case "admin_close":
+      return await tg("deleteMessage", { chat_id: chatId, message_id: messageId }).catch(() => {});
+    case "admin_stats": {
+      const s = await stats();
+      const text =
+        `📊 <b>סטטיסטיקות</b>\n\n` +
+        `🎬 סרטים: <b>${s.movies.toLocaleString()}</b>\n` +
+        `👤 משתמשים פעילים: <b>${s.users.toLocaleString()}</b>\n` +
+        `👥 קבוצות פעילות: <b>${s.groups.toLocaleString()}</b>\n` +
+        `⭐ סה״כ כוכבים שתרמו: <b>${s.totalStars.toLocaleString()}</b>`;
+      return await editMessageText(chatId, messageId, text, {
+        reply_markup: { inline_keyboard: [[{ text: "« חזרה", callback_data: "admin_open" }]] },
+      }).catch(() => {});
+    }
+    case "admin_set_source":
+      await setAdminState(userId, "awaiting_source_channel");
+      return await sendMessage(
+        chatId,
+        "📥 שלח לי את <b>שם המשתמש</b> או <b>ה-ID</b> של ערוץ הסרטים.\n\n" +
+          "דוגמה: <code>@my_movies</code> או <code>-1001234567890</code>.\n" +
+          "ודא שהבוט הוסף לערוץ <b>כאדמין</b> עם הרשאות קריאה.\n\n" +
+          "שלח /cancel לביטול.",
+      );
+    case "admin_set_required":
+      await setAdminState(userId, "awaiting_required_channel");
+      return await sendMessage(
+        chatId,
+        "🔒 שלח לי את <b>שם המשתמש</b> או <b>ה-ID</b> של ערוץ החובה.\n\n" +
+          "דוגמה: <code>@my_channel</code>.\n" +
+          "ודא שהבוט הוסף לערוץ <b>כאדמין</b>.\n\n" +
+          "שלח /cancel לביטול.",
+      );
+    case "admin_bc_private":
+      await setAdminState(userId, "awaiting_broadcast", { target: "private" });
+      return await sendMessage(chatId, "✏️ שלח את ההודעה לשידור <b>לכל המשתמשים בפרטי</b>.\nשלח /cancel לביטול.");
+    case "admin_bc_groups":
+      await setAdminState(userId, "awaiting_broadcast", { target: "groups" });
+      return await sendMessage(chatId, "✏️ שלח את ההודעה לשידור <b>לכל הקבוצות</b> (תוצמד אוטומטית).\nשלח /cancel לביטול.");
+    case "admin_bc_all":
+      await setAdminState(userId, "awaiting_broadcast", { target: "all" });
+      return await sendMessage(chatId, "✏️ שלח את ההודעה לשידור <b>לכולם</b> (בקבוצות תוצמד אוטומטית).\nשלח /cancel לביטול.");
+  }
+}
+
+async function handleAdminStateInput(chatId: number, userId: number, st: { state: string; data: any }, msg: any) {
+  const text: string = (msg.text || "").trim();
+  if (text === "/cancel") {
+    await setAdminState(userId, null);
+    await sendMessage(chatId, "❎ בוטל.");
+    return;
+  }
+
+  if (st.state === "awaiting_source_channel" || st.state === "awaiting_required_channel") {
+    const target = st.state === "awaiting_source_channel" ? "source" : "required";
+    const chatRef = text.startsWith("@") || text.startsWith("-") || /^\d+$/.test(text) ? text : `@${text}`;
+    try {
+      const ch: any = await getChat(chatRef);
+      // verify bot is admin
+      const me = await getMe();
+      const mem: any = await getChatMember(ch.id, me.id).catch(() => null);
+      if (!mem || !["administrator", "creator"].includes(mem.status)) {
+        await sendMessage(chatId, "❌ הבוט לא אדמין בערוץ הזה. הוסף אותו כאדמין ונסה שוב.");
+        return;
+      }
+      let invite = ch.invite_link as string | null;
+      if (!invite && !ch.username) {
+        try {
+          const link: any = await tg("createChatInviteLink", { chat_id: ch.id });
+          invite = link.invite_link;
+        } catch {}
+      }
+      if (target === "source") {
+        await updateSettings({
+          source_channel_id: Number(ch.id),
+          source_channel_username: ch.username || null,
+          source_channel_title: ch.title || null,
+        });
+        await sendMessage(
+          chatId,
+          `✅ ערוץ הסרטים נקבע: <b>${escapeHtml(ch.title || ch.username || String(ch.id))}</b>\n\n` +
+            `מעכשיו, כל סרט חדש שיתפרסם בערוץ יתווסף אוטומטית למאגר.\n\n` +
+            `ℹ️ לאינדוקס הסרטים הקיימים, השתמש בסקריפט Telethon (אני אספק לך).`,
+        );
+      } else {
+        await updateSettings({
+          required_channel_id: Number(ch.id),
+          required_channel_username: ch.username || null,
+          required_channel_title: ch.title || null,
+          required_channel_invite_link: invite || (ch.username ? `https://t.me/${ch.username}` : null),
+        });
+        await sendMessage(chatId, `✅ ערוץ חובה נקבע: <b>${escapeHtml(ch.title || ch.username || String(ch.id))}</b>`);
+      }
+      await setAdminState(userId, null);
+    } catch (e: any) {
+      await sendMessage(chatId, `❌ לא הצלחתי לאמת את הערוץ.\n${escapeHtml(e?.description || e?.message || "")}`);
+    }
+    return;
+  }
+
+  if (st.state === "awaiting_broadcast") {
+    const target = st.data?.target as "private" | "groups" | "all";
+    await setAdminState(userId, null);
+    await sendMessage(chatId, "🚀 מתחיל שידור...");
+    runBroadcast(chatId, userId, target, msg).catch((e) => console.error("broadcast error:", e));
+    return;
+  }
+}
+
+async function runBroadcast(adminChatId: number, adminUserId: number, target: "private" | "groups" | "all", srcMsg: any) {
+  const users = target === "private" || target === "all" ? await listUsers() : [];
+  const groups = target === "groups" || target === "all" ? await listGroups() : [];
+  const recipients: { id: number; pin: boolean }[] = [
+    ...users.map((id) => ({ id, pin: false })),
+    ...groups.map((id) => ({ id, pin: true })),
+  ];
+  let sent = 0;
+  let failed = 0;
+  const fromChatId = srcMsg.chat.id;
+  const messageId = srcMsg.message_id;
+
+  for (let i = 0; i < recipients.length; i++) {
+    const r = recipients[i];
+    try {
+      const copied: any = await copyMessage(r.id, fromChatId, messageId);
+      sent++;
+      if (r.pin && copied?.message_id) {
+        await pinChatMessage(r.id, copied.message_id, true).catch(() => {});
+      }
+    } catch (e: any) {
+      failed++;
+      const code = e?.code;
+      const desc: string = e?.description || "";
+      if (code === 403 || /blocked|deactivated|kicked|chat not found/i.test(desc)) {
+        if (r.pin) await markGroupInactive(r.id).catch(() => {});
+        else await markUserBlocked(r.id).catch(() => {});
+      }
+    }
+    // Telegram rate limit: ~30 msg/sec global
+    if (i % 25 === 24) await sleep(1000);
+    // Periodic progress
+    if (i % 500 === 499) {
+      await sendMessage(adminChatId, `📤 התקדמות: ${i + 1}/${recipients.length} · נשלח: ${sent} · נכשל: ${failed}`).catch(() => {});
+    }
+  }
+  await sendMessage(
+    adminChatId,
+    `✅ <b>שידור הסתיים</b>\n\nיעד: ${target}\nסה״כ: ${recipients.length}\nנשלח: ${sent}\nנכשל: ${failed}`,
+  );
+}
+
+// ───── Payments ─────
+async function handlePreCheckout(q: any) {
+  await answerPreCheckoutQuery(q.id, true).catch((e) => console.error("preCheckout:", e?.message));
+}
+
+// ───── Utils ─────
+function escapeHtml(s: string) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}

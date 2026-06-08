@@ -591,8 +591,13 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
     return;
   }
 
-  if (st.state === "awaiting_source_channel" || st.state === "awaiting_required_channel") {
-    const target = st.state === "awaiting_source_channel" ? "source" : "required";
+  if (
+    st.state === "awaiting_source_channel" ||
+    st.state === "awaiting_source_channel_add" ||
+    st.state === "awaiting_required_channel"
+  ) {
+    const target =
+      st.state === "awaiting_required_channel" ? "required" : "source";
     const chatRef = text.startsWith("@") || text.startsWith("-") || /^\d+$/.test(text) ? text : `@${text}`;
     try {
       const ch: any = await getChat(chatRef);
@@ -611,16 +616,18 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
         } catch {}
       }
       if (target === "source") {
-        await updateSettings({
-          source_channel_id: Number(ch.id),
-          source_channel_username: ch.username || null,
-          source_channel_title: ch.title || null,
+        // Add to the multi-channel list (does NOT clear existing channels).
+        await addSourceChannel({
+          chat_id: Number(ch.id),
+          username: ch.username || null,
+          title: ch.title || null,
+          added_by: userId,
         });
         await sendMessage(
           chatId,
-          `✅ ערוץ הסרטים נקבע: <b>${escapeHtml(ch.title || ch.username || String(ch.id))}</b>\n\n` +
+          `✅ ערוץ סרטים נוסף: <b>${escapeHtml(ch.title || ch.username || String(ch.id))}</b>\n\n` +
             `מעכשיו, כל סרט חדש שיתפרסם בערוץ יתווסף אוטומטית למאגר.\n\n` +
-            `ℹ️ לאינדוקס הסרטים הקיימים, השתמש בסקריפט Telethon (אני אספק לך).`,
+            `ℹ️ לאינדוקס הסרטים הקיימים בערוץ, השתמש בסקריפט Telethon.`,
         );
       } else {
         await updateSettings({
@@ -641,8 +648,15 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
   if (st.state === "awaiting_broadcast") {
     const target = st.data?.target as "private" | "groups" | "all";
     await setAdminState(userId, null);
-    await sendMessage(chatId, "🚀 מתחיל שידור...");
-    runBroadcast(chatId, userId, target, msg).catch((e) => console.error("broadcast error:", e));
+    await sendMessage(chatId, "🚀 מתחיל שידור — זה עשוי לקחת זמן, אל תסגור את הצ׳אט...");
+    // MUST await — in the Worker runtime detached promises are cancelled
+    // when the handler returns, which is why broadcasts never actually went out.
+    try {
+      await runBroadcast(chatId, userId, target, msg);
+    } catch (e: any) {
+      console.error("broadcast error:", e?.message || e);
+      await sendMessage(chatId, `❌ שגיאה בשידור: ${escapeHtml(e?.message || String(e))}`).catch(() => {});
+    }
     return;
   }
 

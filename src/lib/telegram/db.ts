@@ -108,7 +108,7 @@ export async function searchMovies(query: string, page: number, pageSize: number
   const includeCount = opts.includeCount !== false;
   const req = admin()
     .from("movies")
-    .select("id,title,message_id,source_channel_id", includeCount ? { count: "exact" } : undefined)
+    .select("id,title,message_id,source_channel_id", includeCount ? { count: "exact" } : {})
     .or(ors.join(","))
     .order("id", { ascending: false })
     .range(from, to);

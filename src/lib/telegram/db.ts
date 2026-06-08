@@ -96,14 +96,21 @@ export async function searchMovies(query: string, page: number, pageSize: number
   if (!q) return { rows: [] as any[], total: 0 };
   const from = page * pageSize;
   const to = from + pageSize - 1;
-  // ILIKE search; multi-word: split and AND them.
-  const words = q.split(/\s+/).filter(Boolean).slice(0, 6);
-  let req = admin().from("movies").select("id,title,message_id,source_channel_id", { count: "exact" });
+  // ILIKE search across title+caption. Build one combined OR filter so the
+  // PostgREST query stays a single .or() call (chained .or() replaces, not ANDs).
+  const words = q.split(/\s+/).filter(Boolean).slice(0, 4);
+  const ors: string[] = [];
   for (const w of words) {
-    const esc = w.replace(/[%_]/g, "\\$&");
-    req = req.or(`title.ilike.%${esc}%,raw_caption.ilike.%${esc}%`);
+    const esc = w.replace(/[%_,()]/g, "\\$&");
+    ors.push(`title.ilike.%${esc}%`);
+    ors.push(`raw_caption.ilike.%${esc}%`);
   }
-  req = req.order("id", { ascending: false }).range(from, to);
+  const req = admin()
+    .from("movies")
+    .select("id,title,message_id,source_channel_id", { count: "exact" })
+    .or(ors.join(","))
+    .order("id", { ascending: false })
+    .range(from, to);
   const { data, error, count } = await req;
   if (error) throw error;
   return { rows: data ?? [], total: count ?? 0 };
@@ -193,4 +200,29 @@ export async function addAdmin(p: { telegram_id: number; added_by: number; expir
 
 export async function removeAdmin(telegram_id: number) {
   await admin().from("bot_admins").delete().eq("telegram_id", telegram_id);
+}
+
+// ───── Multi source channels ─────
+export async function listSourceChannels(): Promise<{ chat_id: number; username: string | null; title: string | null }[]> {
+  const { data } = await admin().from("bot_source_channels").select("chat_id,username,title").order("created_at", { ascending: true });
+  return (data as any) ?? [];
+}
+export async function addSourceChannel(p: { chat_id: number; username: string | null; title: string | null; added_by: number }) {
+  await admin().from("bot_source_channels").upsert(p as any, { onConflict: "chat_id" });
+}
+export async function removeSourceChannel(chat_id: number) {
+  await admin().from("bot_source_channels").delete().eq("chat_id", chat_id);
+}
+export async function isSourceChannel(chat_id: number): Promise<boolean> {
+  const { data } = await admin().from("bot_source_channels").select("chat_id").eq("chat_id", chat_id).maybeSingle();
+  return !!data;
+}
+
+// ───── Query cache (pagination) ─────
+export async function cacheQuery(id: string, query: string) {
+  await admin().from("query_cache").upsert({ id, query, created_at: new Date().toISOString() }, { onConflict: "id" });
+}
+export async function getCachedQuery(id: string): Promise<string | null> {
+  const { data } = await admin().from("query_cache").select("query").eq("id", id).maybeSingle();
+  return (data as any)?.query ?? null;
 }

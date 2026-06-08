@@ -35,10 +35,12 @@ import {
   removeSourceChannel,
   searchMovies,
   setAdminState,
+  setLatestPageRequest,
   stats,
   updateSettings,
   upsertGroup,
   upsertUser,
+  isLatestPageRequest,
   type BotSettings,
 } from "./db";
 import {
@@ -298,6 +300,8 @@ async function runSearchAndRespond(
   editMessageId: number | null,
   inGroup: boolean,
   queryIdOverride?: string,
+  latestScope?: string,
+  latestToken?: string,
 ) {
   const me = await getMe();
   let qid = queryIdOverride || shortId(query);
@@ -322,10 +326,11 @@ async function runSearchAndRespond(
     else await sendMessage(chatId, txt);
     return;
   }
+  if (latestScope && latestToken && !(await isLatestPageRequest(latestScope, latestToken).catch(() => true))) return;
   const totalPages = Math.ceil(total / PAGE_SIZE);
   const safePage = Math.max(0, Math.min(page, totalPages - 1));
   if (safePage !== page) {
-    return await runSearchAndRespond(chatId, userId, query, safePage, editMessageId, inGroup, qid);
+    return await runSearchAndRespond(chatId, userId, query, safePage, editMessageId, inGroup, qid, latestScope, latestToken);
   }
   const header = `🔎 תוצאות עבור: <b>${escapeHtml(query)}</b>\nנמצאו ${total.toLocaleString()} תוצאות${totalPages > 1 ? ` · עמוד ${page + 1}/${totalPages}` : ""}`;
   const kb = resultsKeyboard(rows as any, page, totalPages, qid, me.username, inGroup);
@@ -450,7 +455,10 @@ async function handleCallback(cq: any) {
       return;
     }
     const inGroup = msg.chat.type !== "private";
-    await runSearchAndRespond(chatId, from.id, cached.query, page, msg.message_id, inGroup, qid);
+    const latestScope = `${chatId}:${msg.message_id}`;
+    const latestToken = `${qid}:${page}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+    await setLatestPageRequest(latestScope, latestToken).catch(() => {});
+    await runSearchAndRespond(chatId, from.id, cached.query, page, msg.message_id, inGroup, qid, latestScope, latestToken);
     return;
   }
 

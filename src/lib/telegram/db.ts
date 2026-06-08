@@ -91,7 +91,7 @@ export async function indexMovie(m: {
   await admin().from("movies").upsert(m as any, { onConflict: "source_channel_id,message_id" });
 }
 
-export async function searchMovies(query: string, page: number, pageSize: number) {
+export async function searchMovies(query: string, page: number, pageSize: number, opts: { includeCount?: boolean; knownTotal?: number } = {}) {
   const q = query.trim();
   if (!q) return { rows: [] as any[], total: 0 };
   const from = page * pageSize;
@@ -105,15 +105,16 @@ export async function searchMovies(query: string, page: number, pageSize: number
     ors.push(`title.ilike.%${esc}%`);
     ors.push(`raw_caption.ilike.%${esc}%`);
   }
+  const includeCount = opts.includeCount !== false;
   const req = admin()
     .from("movies")
-    .select("id,title,message_id,source_channel_id", { count: "exact" })
+    .select("id,title,message_id,source_channel_id", includeCount ? { count: "exact" } : {})
     .or(ors.join(","))
     .order("id", { ascending: false })
     .range(from, to);
   const { data, error, count } = await req;
   if (error) throw error;
-  return { rows: data ?? [], total: count ?? 0 };
+  return { rows: data ?? [], total: includeCount ? (count ?? 0) : (opts.knownTotal ?? 0) };
 }
 
 export async function getMovieById(id: number) {
@@ -219,10 +220,71 @@ export async function isSourceChannel(chat_id: number): Promise<boolean> {
 }
 
 // ───── Query cache (pagination) ─────
-export async function cacheQuery(id: string, query: string) {
-  await admin().from("query_cache").upsert({ id, query, created_at: new Date().toISOString() }, { onConflict: "id" });
+export type CachedSearch = { query: string; total?: number };
+export type CachedSearchPage = { rows: any[]; total: number };
+
+export async function cacheQuery(id: string, query: string, total?: number) {
+  const value = JSON.stringify({ kind: "search", query, total, cached_at: Date.now() });
+  await admin().from("query_cache").upsert({ id, query: value, created_at: new Date().toISOString() }, { onConflict: "id" });
 }
 export async function getCachedQuery(id: string): Promise<string | null> {
+  const cached = await getCachedSearch(id);
+  return cached?.query ?? null;
+}
+export async function getCachedSearch(id: string): Promise<CachedSearch | null> {
   const { data } = await admin().from("query_cache").select("query").eq("id", id).maybeSingle();
-  return (data as any)?.query ?? null;
+  const value = (data as any)?.query;
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed?.kind === "search" && typeof parsed.query === "string") return { query: parsed.query, total: parsed.total };
+  } catch {
+    // Backward compatibility with old rows that stored only the raw query text.
+  }
+  return { query: value };
+}
+export async function cacheSearchPage(id: string, page: number, pageSize: number, rows: any[], total: number) {
+  const value = JSON.stringify({ kind: "page", rows, total, cached_at: Date.now() });
+  await admin().from("query_cache").upsert(
+    { id: pageCacheId(id, page, pageSize), query: value, created_at: new Date().toISOString() },
+    { onConflict: "id" },
+  );
+}
+export async function getCachedSearchPage(id: string, page: number, pageSize: number): Promise<CachedSearchPage | null> {
+  const { data } = await admin().from("query_cache").select("query").eq("id", pageCacheId(id, page, pageSize)).maybeSingle();
+  const value = (data as any)?.query;
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed?.kind === "page" && Array.isArray(parsed.rows) && typeof parsed.total === "number") {
+      return { rows: parsed.rows, total: parsed.total };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+export async function setLatestPageRequest(scope: string, token: string) {
+  await admin().from("query_cache").upsert(
+    { id: pageRequestId(scope), query: JSON.stringify({ kind: "latest_page_request", token }), created_at: new Date().toISOString() },
+    { onConflict: "id" },
+  );
+}
+export async function isLatestPageRequest(scope: string, token: string): Promise<boolean> {
+  const { data } = await admin().from("query_cache").select("query").eq("id", pageRequestId(scope)).maybeSingle();
+  const value = (data as any)?.query;
+  if (!value) return true;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed?.kind !== "latest_page_request" || parsed.token === token;
+  } catch {
+    return true;
+  }
+}
+
+function pageCacheId(id: string, page: number, pageSize: number) {
+  return `${id}:p:${page}:${pageSize}`;
+}
+function pageRequestId(scope: string) {
+  return `nav:${scope}`;
 }

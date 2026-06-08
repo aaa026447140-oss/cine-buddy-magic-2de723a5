@@ -9,9 +9,19 @@ export function startMenuKeyboard(s: BotSettings, botUsername: string) {
   if (s.updates_channel_url || s.required_channel_invite_link) {
     rows.push([{ text: "📢 ערוץ עדכונים", url: s.updates_channel_url || s.required_channel_invite_link || "" }]);
   }
+  // Request admin rights so users add the bot as admin (not just member).
+  const addRights = [
+    "change_info",
+    "delete_messages",
+    "invite_users",
+    "pin_messages",
+    "manage_topics",
+    "manage_video_chats",
+    "restrict_members",
+  ].join("+");
   rows.push([
     { text: "❤️ תמיכה בבוט", callback_data: "support_menu" },
-    { text: "➕ הוספה לקבוצה", url: `https://t.me/${botUsername}?startgroup=add` },
+    { text: "➕ הוספה לקבוצה", url: `https://t.me/${botUsername}?startgroup=true&admin=${addRights}` },
   ]);
   rows.push([{ text: "🤖 הזמנת בוט פרטי משלכם", url: INVITE_PRIVATE_BOT_URL }]);
   return { inline_keyboard: rows };
@@ -27,7 +37,7 @@ export function resultsKeyboard(
   results: { id: number; title: string }[],
   page: number,
   totalPages: number,
-  query: string,
+  queryId: string,
   botUsername: string,
   inGroup: boolean,
 ) {
@@ -43,9 +53,9 @@ export function resultsKeyboard(
   }
   if (totalPages > 1) {
     const nav: any[] = [];
-    if (page > 0) nav.push({ text: "« הקודם", callback_data: `pg_${encodeQuery(query)}_${page - 1}` });
+    if (page > 0) nav.push({ text: "« הקודם", callback_data: `pg_${queryId}_${page - 1}` });
     nav.push({ text: `${page + 1}/${totalPages}`, callback_data: "noop" });
-    if (page < totalPages - 1) nav.push({ text: "הבא »", callback_data: `pg_${encodeQuery(query)}_${page + 1}` });
+    if (page < totalPages - 1) nav.push({ text: "הבא »", callback_data: `pg_${queryId}_${page + 1}` });
     rows.push(nav);
   }
   rows.push([
@@ -66,7 +76,7 @@ export function subscribeRequiredKeyboard(inviteUrl: string, recheckPayload: str
 
 export function adminPanelKeyboard(isMain: boolean) {
   const rows: any[][] = [
-    [{ text: "🎬 הגדרת ערוץ סרטים", callback_data: "admin_set_source" }],
+    [{ text: "🎬 ניהול ערוצי סרטים", callback_data: "admin_sources" }],
   ];
   if (isMain) {
     rows.push([{ text: "🔒 הגדרת ערוץ חובה", callback_data: "admin_set_required" }]);
@@ -79,6 +89,17 @@ export function adminPanelKeyboard(isMain: boolean) {
     rows.push([{ text: "👥 ניהול אדמינים", callback_data: "admin_manage" }]);
   }
   rows.push([{ text: "« סגור", callback_data: "admin_close" }]);
+  return { inline_keyboard: rows };
+}
+
+export function sourceChannelsKeyboard(channels: { chat_id: number; username: string | null; title: string | null }[]) {
+  const rows: any[][] = [];
+  for (const c of channels) {
+    const label = `❌ ${c.title || c.username || c.chat_id}`;
+    rows.push([{ text: label, callback_data: `admin_src_rm_${c.chat_id}` }]);
+  }
+  rows.push([{ text: "➕ הוסף ערוץ נוסף", callback_data: "admin_src_add" }]);
+  rows.push([{ text: "« חזרה", callback_data: "admin_open" }]);
   return { inline_keyboard: rows };
 }
 

@@ -303,7 +303,6 @@ async function runSearchAndRespond(
   latestScope?: string,
   latestToken?: string,
 ) {
-  const me = await getMe();
   let qid = queryIdOverride || shortId(query);
   let cachedPage = await getCachedSearchPage(qid, page, PAGE_SIZE).catch(() => null);
   let rows = cachedPage?.rows;
@@ -333,7 +332,8 @@ async function runSearchAndRespond(
     return await runSearchAndRespond(chatId, userId, query, safePage, editMessageId, inGroup, qid, latestScope, latestToken);
   }
   const header = `🔎 תוצאות עבור: <b>${escapeHtml(query)}</b>\nנמצאו ${total.toLocaleString()} תוצאות${totalPages > 1 ? ` · עמוד ${page + 1}/${totalPages}` : ""}`;
-  const kb = resultsKeyboard(rows as any, page, totalPages, qid, me.username, inGroup);
+  const botUsername = inGroup ? (await getMe()).username : "";
+  const kb = resultsKeyboard(rows as any, page, totalPages, qid, botUsername, inGroup);
   if (editMessageId) {
     await editMessageText(chatId, editMessageId, header, { reply_markup: kb }).catch(() => {});
   } else {

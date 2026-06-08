@@ -697,3 +697,18 @@ function escapeHtml(s: string) {
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
+
+// Short stable id for callback_data (8 hex chars from SHA-1 of query).
+function shortId(s: string): string {
+  // Tiny non-crypto hash, no Node 'crypto' dep needed here.
+  let h1 = 0xdeadbeef ^ 0;
+  let h2 = 0x41c6ce57 ^ 0;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return ((h2 >>> 0).toString(16).padStart(8, "0") + (h1 >>> 0).toString(16).padStart(8, "0")).slice(0, 12);
+}

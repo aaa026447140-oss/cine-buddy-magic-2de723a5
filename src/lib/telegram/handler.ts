@@ -480,13 +480,25 @@ async function handleAdminCallback(cq: any, data: string) {
         reply_markup: { inline_keyboard: [[{ text: "« חזרה", callback_data: "admin_open" }]] },
       }).catch(() => {});
     }
-    case "admin_set_source":
-      await setAdminState(userId, "awaiting_source_channel");
+    case "admin_sources": {
+      const list = await listSourceChannels();
+      const lines = list.length
+        ? list.map((c) => `• <b>${escapeHtml(c.title || c.username || String(c.chat_id))}</b> — <code>${c.chat_id}</code>`).join("\n")
+        : "<i>אין ערוצי סרטים מוגדרים.</i>";
+      return await editMessageText(
+        chatId,
+        messageId,
+        `🎬 <b>ערוצי סרטים</b>\n\n${lines}\n\nלחיצה על ❌ תסיר ערוץ. כל הסרטים שכבר נאספו נשמרים במאגר.`,
+        { reply_markup: sourceChannelsKeyboard(list) },
+      ).catch(() => {});
+    }
+    case "admin_src_add":
+      await setAdminState(userId, "awaiting_source_channel_add");
       return await sendMessage(
         chatId,
-        "📥 שלח לי את <b>שם המשתמש</b> או <b>ה-ID</b> של ערוץ הסרטים.\n\n" +
+        "📥 שלח לי את <b>שם המשתמש</b> או <b>ה-ID</b> של ערוץ סרטים <b>נוסף</b>.\n\n" +
           "דוגמה: <code>@my_movies</code> או <code>-1001234567890</code>.\n" +
-          "ודא שהבוט הוסף לערוץ <b>כאדמין</b> עם הרשאות קריאה.\n\n" +
+          "הוסף את הבוט לערוץ <b>כאדמין</b> תחילה.\n\n" +
           "שלח /cancel לביטול.",
       );
     case "admin_set_required":
@@ -535,6 +547,20 @@ async function handleAdminCallback(cq: any, data: string) {
           "<code>123456789 0</code> — אדמין קבוע\n\n" +
           "שלח /cancel לביטול.",
       );
+  }
+  if (data.startsWith("admin_src_rm_")) {
+    const cid = Number(data.slice("admin_src_rm_".length));
+    await removeSourceChannel(cid);
+    const list = await listSourceChannels();
+    const lines = list.length
+      ? list.map((c) => `• <b>${escapeHtml(c.title || c.username || String(c.chat_id))}</b> — <code>${c.chat_id}</code>`).join("\n")
+      : "<i>אין ערוצי סרטים מוגדרים.</i>";
+    return await editMessageText(
+      chatId,
+      messageId,
+      `🎬 <b>ערוצי סרטים</b>\n\n${lines}\n\n✅ הוסר: <code>${cid}</code>`,
+      { reply_markup: sourceChannelsKeyboard(list) },
+    ).catch(() => {});
   }
   if (data.startsWith("admin_rm_")) {
     const tid = Number(data.slice("admin_rm_".length));

@@ -131,6 +131,30 @@ export type Database = {
         }
         Relationships: []
       }
+      bot_source_channels: {
+        Row: {
+          added_by: number | null
+          chat_id: number
+          created_at: string
+          title: string | null
+          username: string | null
+        }
+        Insert: {
+          added_by?: number | null
+          chat_id: number
+          created_at?: string
+          title?: string | null
+          username?: string | null
+        }
+        Update: {
+          added_by?: number | null
+          chat_id?: number
+          created_at?: string
+          title?: string | null
+          username?: string | null
+        }
+        Relationships: []
+      }
       bot_users: {
         Row: {
           first_name: string | null
@@ -230,6 +254,24 @@ export type Database = {
           raw_caption?: string | null
           source_channel_id?: number
           title?: string
+        }
+        Relationships: []
+      }
+      query_cache: {
+        Row: {
+          created_at: string
+          id: string
+          query: string
+        }
+        Insert: {
+          created_at?: string
+          id: string
+          query: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          query?: string
         }
         Relationships: []
       }

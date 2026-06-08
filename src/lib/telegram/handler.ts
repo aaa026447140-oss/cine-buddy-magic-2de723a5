@@ -13,18 +13,24 @@ import {
 import { ADMIN_ID, PAGE_SIZE, STAR_AMOUNTS } from "./constants";
 import {
   addAdmin,
+  addSourceChannel,
+  cacheQuery,
+  getCachedQuery,
   getAdminState,
   getMovieById,
   getSettings,
   indexMovie,
+  isSourceChannel,
   isUserAdmin,
   listAdmins,
   listGroups,
+  listSourceChannels,
   listUsers,
   markGroupInactive,
   markUserBlocked,
   recordPayment,
   removeAdmin,
+  removeSourceChannel,
   searchMovies,
   setAdminState,
   stats,
@@ -36,9 +42,8 @@ import {
 import {
   adminPanelKeyboard,
   adminsListKeyboard,
-  decodeQuery,
-  encodeQuery,
   resultsKeyboard,
+  sourceChannelsKeyboard,
   startMenuKeyboard,
   subscribeRequiredKeyboard,
   supportMenuKeyboard,
@@ -120,15 +125,19 @@ export async function handleUpdate(update: any) {
 
 // ───── Channel posts (auto-index new movies) ─────
 async function handleChannelPost(msg: any) {
-  const settings = await getSettings();
-  if (!settings.source_channel_id) return;
-  if (Number(msg.chat.id) !== Number(settings.source_channel_id)) return;
+  const chatId = Number(msg.chat.id);
+  // Accept any chat in the multi-source list (plus legacy single setting).
+  const fromMulti = await isSourceChannel(chatId);
+  if (!fromMulti) {
+    const settings = await getSettings();
+    if (Number(settings.source_channel_id || 0) !== chatId) return;
+  }
   const file = extractFile(msg);
   if (!file) return;
   const title = extractTitle(msg);
   if (!title) return;
   await indexMovie({
-    source_channel_id: Number(msg.chat.id),
+    source_channel_id: chatId,
     message_id: Number(msg.message_id),
     title,
     raw_caption: msg.caption || msg.text || null,
@@ -286,6 +295,7 @@ async function runSearchAndRespond(
   page: number,
   editMessageId: number | null,
   inGroup: boolean,
+  queryIdOverride?: string,
 ) {
   const me = await getMe();
   const { rows, total } = await searchMovies(query, page, PAGE_SIZE);
@@ -297,7 +307,13 @@ async function runSearchAndRespond(
   }
   const totalPages = Math.ceil(total / PAGE_SIZE);
   const header = `🔎 תוצאות עבור: <b>${escapeHtml(query)}</b>\nנמצאו ${total.toLocaleString()} תוצאות${totalPages > 1 ? ` · עמוד ${page + 1}/${totalPages}` : ""}`;
-  const kb = resultsKeyboard(rows as any, page, totalPages, query, me.username, inGroup);
+  // Stable short id for callback_data; reuse it across pagination clicks.
+  let qid = queryIdOverride;
+  if (!qid) {
+    qid = shortId(query);
+    await cacheQuery(qid, query).catch(() => {});
+  }
+  const kb = resultsKeyboard(rows as any, page, totalPages, qid, me.username, inGroup);
   if (editMessageId) {
     await editMessageText(chatId, editMessageId, header, { reply_markup: kb }).catch(() => {});
   } else {
@@ -408,14 +424,18 @@ async function handleCallback(cq: any) {
   }
 
   if (data.startsWith("pg_")) {
-    // pg_<encodedQuery>_<page>
+    // pg_<queryId>_<page>
     const rest = data.slice(3);
     const idx = rest.lastIndexOf("_");
-    const enc = rest.slice(0, idx);
+    const qid = rest.slice(0, idx);
     const page = Number(rest.slice(idx + 1));
-    const q = decodeQuery(enc);
+    const q = (await getCachedQuery(qid)) || "";
+    if (!q) {
+      await editMessageText(chatId, msg.message_id, "❌ פג תוקף החיפוש. שלח שוב את שם הסרט.").catch(() => {});
+      return;
+    }
     const inGroup = msg.chat.type !== "private";
-    await runSearchAndRespond(chatId, from.id, q, page, msg.message_id, inGroup);
+    await runSearchAndRespond(chatId, from.id, q, page, msg.message_id, inGroup, qid);
     return;
   }
 
@@ -460,13 +480,25 @@ async function handleAdminCallback(cq: any, data: string) {
         reply_markup: { inline_keyboard: [[{ text: "« חזרה", callback_data: "admin_open" }]] },
       }).catch(() => {});
     }
-    case "admin_set_source":
-      await setAdminState(userId, "awaiting_source_channel");
+    case "admin_sources": {
+      const list = await listSourceChannels();
+      const lines = list.length
+        ? list.map((c) => `• <b>${escapeHtml(c.title || c.username || String(c.chat_id))}</b> — <code>${c.chat_id}</code>`).join("\n")
+        : "<i>אין ערוצי סרטים מוגדרים.</i>";
+      return await editMessageText(
+        chatId,
+        messageId,
+        `🎬 <b>ערוצי סרטים</b>\n\n${lines}\n\nלחיצה על ❌ תסיר ערוץ. כל הסרטים שכבר נאספו נשמרים במאגר.`,
+        { reply_markup: sourceChannelsKeyboard(list) },
+      ).catch(() => {});
+    }
+    case "admin_src_add":
+      await setAdminState(userId, "awaiting_source_channel_add");
       return await sendMessage(
         chatId,
-        "📥 שלח לי את <b>שם המשתמש</b> או <b>ה-ID</b> של ערוץ הסרטים.\n\n" +
+        "📥 שלח לי את <b>שם המשתמש</b> או <b>ה-ID</b> של ערוץ סרטים <b>נוסף</b>.\n\n" +
           "דוגמה: <code>@my_movies</code> או <code>-1001234567890</code>.\n" +
-          "ודא שהבוט הוסף לערוץ <b>כאדמין</b> עם הרשאות קריאה.\n\n" +
+          "הוסף את הבוט לערוץ <b>כאדמין</b> תחילה.\n\n" +
           "שלח /cancel לביטול.",
       );
     case "admin_set_required":
@@ -516,6 +548,20 @@ async function handleAdminCallback(cq: any, data: string) {
           "שלח /cancel לביטול.",
       );
   }
+  if (data.startsWith("admin_src_rm_")) {
+    const cid = Number(data.slice("admin_src_rm_".length));
+    await removeSourceChannel(cid);
+    const list = await listSourceChannels();
+    const lines = list.length
+      ? list.map((c) => `• <b>${escapeHtml(c.title || c.username || String(c.chat_id))}</b> — <code>${c.chat_id}</code>`).join("\n")
+      : "<i>אין ערוצי סרטים מוגדרים.</i>";
+    return await editMessageText(
+      chatId,
+      messageId,
+      `🎬 <b>ערוצי סרטים</b>\n\n${lines}\n\n✅ הוסר: <code>${cid}</code>`,
+      { reply_markup: sourceChannelsKeyboard(list) },
+    ).catch(() => {});
+  }
   if (data.startsWith("admin_rm_")) {
     const tid = Number(data.slice("admin_rm_".length));
     await removeAdmin(tid);
@@ -545,8 +591,13 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
     return;
   }
 
-  if (st.state === "awaiting_source_channel" || st.state === "awaiting_required_channel") {
-    const target = st.state === "awaiting_source_channel" ? "source" : "required";
+  if (
+    st.state === "awaiting_source_channel" ||
+    st.state === "awaiting_source_channel_add" ||
+    st.state === "awaiting_required_channel"
+  ) {
+    const target =
+      st.state === "awaiting_required_channel" ? "required" : "source";
     const chatRef = text.startsWith("@") || text.startsWith("-") || /^\d+$/.test(text) ? text : `@${text}`;
     try {
       const ch: any = await getChat(chatRef);
@@ -565,16 +616,18 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
         } catch {}
       }
       if (target === "source") {
-        await updateSettings({
-          source_channel_id: Number(ch.id),
-          source_channel_username: ch.username || null,
-          source_channel_title: ch.title || null,
+        // Add to the multi-channel list (does NOT clear existing channels).
+        await addSourceChannel({
+          chat_id: Number(ch.id),
+          username: ch.username || null,
+          title: ch.title || null,
+          added_by: userId,
         });
         await sendMessage(
           chatId,
-          `✅ ערוץ הסרטים נקבע: <b>${escapeHtml(ch.title || ch.username || String(ch.id))}</b>\n\n` +
+          `✅ ערוץ סרטים נוסף: <b>${escapeHtml(ch.title || ch.username || String(ch.id))}</b>\n\n` +
             `מעכשיו, כל סרט חדש שיתפרסם בערוץ יתווסף אוטומטית למאגר.\n\n` +
-            `ℹ️ לאינדוקס הסרטים הקיימים, השתמש בסקריפט Telethon (אני אספק לך).`,
+            `ℹ️ לאינדוקס הסרטים הקיימים בערוץ, השתמש בסקריפט Telethon.`,
         );
       } else {
         await updateSettings({
@@ -595,8 +648,15 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
   if (st.state === "awaiting_broadcast") {
     const target = st.data?.target as "private" | "groups" | "all";
     await setAdminState(userId, null);
-    await sendMessage(chatId, "🚀 מתחיל שידור...");
-    runBroadcast(chatId, userId, target, msg).catch((e) => console.error("broadcast error:", e));
+    await sendMessage(chatId, "🚀 מתחיל שידור — זה עשוי לקחת זמן, אל תסגור את הצ׳אט...");
+    // MUST await — in the Worker runtime detached promises are cancelled
+    // when the handler returns, which is why broadcasts never actually went out.
+    try {
+      await runBroadcast(chatId, userId, target, msg);
+    } catch (e: any) {
+      console.error("broadcast error:", e?.message || e);
+      await sendMessage(chatId, `❌ שגיאה בשידור: ${escapeHtml(e?.message || String(e))}`).catch(() => {});
+    }
     return;
   }
 
@@ -676,4 +736,19 @@ function escapeHtml(s: string) {
 }
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+// Short stable id for callback_data (8 hex chars from SHA-1 of query).
+function shortId(s: string): string {
+  // Tiny non-crypto hash, no Node 'crypto' dep needed here.
+  let h1 = 0xdeadbeef ^ 0;
+  let h2 = 0x41c6ce57 ^ 0;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return ((h2 >>> 0).toString(16).padStart(8, "0") + (h1 >>> 0).toString(16).padStart(8, "0")).slice(0, 12);
 }

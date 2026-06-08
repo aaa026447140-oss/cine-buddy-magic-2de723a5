@@ -13,18 +13,24 @@ import {
 import { ADMIN_ID, PAGE_SIZE, STAR_AMOUNTS } from "./constants";
 import {
   addAdmin,
+  addSourceChannel,
+  cacheQuery,
+  getCachedQuery,
   getAdminState,
   getMovieById,
   getSettings,
   indexMovie,
+  isSourceChannel,
   isUserAdmin,
   listAdmins,
   listGroups,
+  listSourceChannels,
   listUsers,
   markGroupInactive,
   markUserBlocked,
   recordPayment,
   removeAdmin,
+  removeSourceChannel,
   searchMovies,
   setAdminState,
   stats,
@@ -36,9 +42,8 @@ import {
 import {
   adminPanelKeyboard,
   adminsListKeyboard,
-  decodeQuery,
-  encodeQuery,
   resultsKeyboard,
+  sourceChannelsKeyboard,
   startMenuKeyboard,
   subscribeRequiredKeyboard,
   supportMenuKeyboard,
@@ -120,15 +125,19 @@ export async function handleUpdate(update: any) {
 
 // ───── Channel posts (auto-index new movies) ─────
 async function handleChannelPost(msg: any) {
-  const settings = await getSettings();
-  if (!settings.source_channel_id) return;
-  if (Number(msg.chat.id) !== Number(settings.source_channel_id)) return;
+  const chatId = Number(msg.chat.id);
+  // Accept any chat in the multi-source list (plus legacy single setting).
+  const fromMulti = await isSourceChannel(chatId);
+  if (!fromMulti) {
+    const settings = await getSettings();
+    if (Number(settings.source_channel_id || 0) !== chatId) return;
+  }
   const file = extractFile(msg);
   if (!file) return;
   const title = extractTitle(msg);
   if (!title) return;
   await indexMovie({
-    source_channel_id: Number(msg.chat.id),
+    source_channel_id: chatId,
     message_id: Number(msg.message_id),
     title,
     raw_caption: msg.caption || msg.text || null,

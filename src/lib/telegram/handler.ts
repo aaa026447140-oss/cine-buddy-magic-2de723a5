@@ -334,6 +334,7 @@ async function runSearchAndRespond(
   const header = `🔎 תוצאות עבור: <b>${escapeHtml(query)}</b>\nנמצאו ${total.toLocaleString()} תוצאות${totalPages > 1 ? ` · עמוד ${page + 1}/${totalPages}` : ""}`;
   const botUsername = inGroup ? (await getMe()).username : "";
   const kb = resultsKeyboard(rows as any, page, totalPages, qid, botUsername, inGroup);
+  if (latestScope && latestToken && !(await isLatestPageRequest(latestScope, latestToken).catch(() => true))) return;
   if (editMessageId) {
     await editMessageText(chatId, editMessageId, header, { reply_markup: kb }).catch(() => {});
   } else {

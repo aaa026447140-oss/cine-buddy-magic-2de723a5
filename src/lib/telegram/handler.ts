@@ -300,7 +300,22 @@ async function runSearchAndRespond(
   queryIdOverride?: string,
 ) {
   const me = await getMe();
-  const { rows, total } = await searchMovies(query, page, PAGE_SIZE);
+  let qid = queryIdOverride || shortId(query);
+  let cachedPage = await getCachedSearchPage(qid, page, PAGE_SIZE).catch(() => null);
+  let rows = cachedPage?.rows;
+  let total = cachedPage?.total;
+
+  if (!rows || typeof total !== "number") {
+    const cachedSearch = queryIdOverride ? await getCachedSearch(qid).catch(() => null) : null;
+    const knownTotal = cachedSearch?.total;
+    const fresh = await searchMovies(query, page, PAGE_SIZE, { includeCount: knownTotal === undefined, knownTotal });
+    rows = fresh.rows;
+    total = fresh.total;
+    await Promise.all([
+      cacheQuery(qid, query, total).catch(() => {}),
+      cacheSearchPage(qid, page, PAGE_SIZE, rows, total).catch(() => {}),
+    ]);
+  }
   if (total === 0) {
     const txt = `❌ לא נמצאו תוצאות עבור: <b>${escapeHtml(query)}</b>`;
     if (editMessageId) await editMessageText(chatId, editMessageId, txt).catch(() => {});
@@ -308,13 +323,11 @@ async function runSearchAndRespond(
     return;
   }
   const totalPages = Math.ceil(total / PAGE_SIZE);
-  const header = `🔎 תוצאות עבור: <b>${escapeHtml(query)}</b>\nנמצאו ${total.toLocaleString()} תוצאות${totalPages > 1 ? ` · עמוד ${page + 1}/${totalPages}` : ""}`;
-  // Stable short id for callback_data; reuse it across pagination clicks.
-  let qid = queryIdOverride;
-  if (!qid) {
-    qid = shortId(query);
-    await cacheQuery(qid, query).catch(() => {});
+  const safePage = Math.max(0, Math.min(page, totalPages - 1));
+  if (safePage !== page) {
+    return await runSearchAndRespond(chatId, userId, query, safePage, editMessageId, inGroup, qid);
   }
+  const header = `🔎 תוצאות עבור: <b>${escapeHtml(query)}</b>\nנמצאו ${total.toLocaleString()} תוצאות${totalPages > 1 ? ` · עמוד ${page + 1}/${totalPages}` : ""}`;
   const kb = resultsKeyboard(rows as any, page, totalPages, qid, me.username, inGroup);
   if (editMessageId) {
     await editMessageText(chatId, editMessageId, header, { reply_markup: kb }).catch(() => {});
@@ -431,13 +444,13 @@ async function handleCallback(cq: any) {
     const idx = rest.lastIndexOf("_");
     const qid = rest.slice(0, idx);
     const page = Number(rest.slice(idx + 1));
-    const q = (await getCachedQuery(qid)) || "";
-    if (!q) {
+    const cached = await getCachedSearch(qid);
+    if (!cached?.query || !Number.isFinite(page) || page < 0) {
       await editMessageText(chatId, msg.message_id, "❌ פג תוקף החיפוש. שלח שוב את שם הסרט.").catch(() => {});
       return;
     }
     const inGroup = msg.chat.type !== "private";
-    await runSearchAndRespond(chatId, from.id, q, page, msg.message_id, inGroup, qid);
+    await runSearchAndRespond(chatId, from.id, cached.query, page, msg.message_id, inGroup, qid);
     return;
   }
 

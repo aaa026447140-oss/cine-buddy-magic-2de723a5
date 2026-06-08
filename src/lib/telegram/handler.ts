@@ -295,6 +295,7 @@ async function runSearchAndRespond(
   page: number,
   editMessageId: number | null,
   inGroup: boolean,
+  queryIdOverride?: string,
 ) {
   const me = await getMe();
   const { rows, total } = await searchMovies(query, page, PAGE_SIZE);
@@ -306,7 +307,13 @@ async function runSearchAndRespond(
   }
   const totalPages = Math.ceil(total / PAGE_SIZE);
   const header = `🔎 תוצאות עבור: <b>${escapeHtml(query)}</b>\nנמצאו ${total.toLocaleString()} תוצאות${totalPages > 1 ? ` · עמוד ${page + 1}/${totalPages}` : ""}`;
-  const kb = resultsKeyboard(rows as any, page, totalPages, query, me.username, inGroup);
+  // Stable short id for callback_data; reuse it across pagination clicks.
+  let qid = queryIdOverride;
+  if (!qid) {
+    qid = shortId(query);
+    await cacheQuery(qid, query).catch(() => {});
+  }
+  const kb = resultsKeyboard(rows as any, page, totalPages, qid, me.username, inGroup);
   if (editMessageId) {
     await editMessageText(chatId, editMessageId, header, { reply_markup: kb }).catch(() => {});
   } else {
@@ -417,14 +424,18 @@ async function handleCallback(cq: any) {
   }
 
   if (data.startsWith("pg_")) {
-    // pg_<encodedQuery>_<page>
+    // pg_<queryId>_<page>
     const rest = data.slice(3);
     const idx = rest.lastIndexOf("_");
-    const enc = rest.slice(0, idx);
+    const qid = rest.slice(0, idx);
     const page = Number(rest.slice(idx + 1));
-    const q = decodeQuery(enc);
+    const q = (await getCachedQuery(qid)) || "";
+    if (!q) {
+      await editMessageText(chatId, msg.message_id, "❌ פג תוקף החיפוש. שלח שוב את שם הסרט.").catch(() => {});
+      return;
+    }
     const inGroup = msg.chat.type !== "private";
-    await runSearchAndRespond(chatId, from.id, q, page, msg.message_id, inGroup);
+    await runSearchAndRespond(chatId, from.id, q, page, msg.message_id, inGroup, qid);
     return;
   }
 

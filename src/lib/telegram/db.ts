@@ -264,7 +264,27 @@ export async function getCachedSearchPage(id: string, page: number, pageSize: nu
   }
   return null;
 }
+export async function setLatestPageRequest(scope: string, token: string) {
+  await admin().from("query_cache").upsert(
+    { id: pageRequestId(scope), query: JSON.stringify({ kind: "latest_page_request", token }), created_at: new Date().toISOString() },
+    { onConflict: "id" },
+  );
+}
+export async function isLatestPageRequest(scope: string, token: string): Promise<boolean> {
+  const { data } = await admin().from("query_cache").select("query").eq("id", pageRequestId(scope)).maybeSingle();
+  const value = (data as any)?.query;
+  if (!value) return true;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed?.kind !== "latest_page_request" || parsed.token === token;
+  } catch {
+    return true;
+  }
+}
 
 function pageCacheId(id: string, page: number, pageSize: number) {
   return `${id}:p:${page}:${pageSize}`;
+}
+function pageRequestId(scope: string) {
+  return `nav:${scope}`;
 }

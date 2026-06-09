@@ -475,8 +475,10 @@ async function handleCallback(cq: any) {
     }
     if (sourcePage !== null) {
       const current = await getPageState(latestScope).catch(() => null);
-      const currentPage = current?.queryId === qid ? current.page : pageFromMessageText(msg.text);
-      if (currentPage !== sourcePage) return;
+      const statePage = current?.queryId === qid ? current.page : null;
+      const textPage = pageFromMessageText(msg.text);
+      if (statePage === page) return;
+      if (statePage !== sourcePage && textPage !== sourcePage) return;
     }
     const inGroup = msg.chat.type !== "private";
     await runSearchAndRespond(chatId, from.id, cached.query, page, msg.message_id, inGroup, qid, latestScope);

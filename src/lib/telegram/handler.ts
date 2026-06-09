@@ -769,6 +769,12 @@ function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function pageFromMessageText(text?: string): number {
+  const match = (text || "").match(/עמוד\s+(\d+)\s*\/\s*\d+/);
+  const oneBasedPage = match ? Number(match[1]) : 1;
+  return Number.isFinite(oneBasedPage) && oneBasedPage > 0 ? oneBasedPage - 1 : 0;
+}
+
 // Short stable id for callback_data (8 hex chars from SHA-1 of query).
 function shortId(s: string): string {
   // Tiny non-crypto hash, no Node 'crypto' dep needed here.

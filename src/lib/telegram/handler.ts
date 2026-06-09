@@ -37,12 +37,10 @@ import {
   searchMovies,
   setAdminState,
   setPageState,
-  setLatestPageRequest,
   stats,
   updateSettings,
   upsertGroup,
   upsertUser,
-  isLatestPageRequest,
   type BotSettings,
 } from "./db";
 import {
@@ -303,7 +301,6 @@ async function runSearchAndRespond(
   inGroup: boolean,
   queryIdOverride?: string,
   latestScope?: string,
-  latestToken?: string,
 ) {
   let qid = queryIdOverride || shortId(query);
   let cachedPage = await getCachedSearchPage(qid, page, PAGE_SIZE).catch(() => null);
@@ -327,19 +324,19 @@ async function runSearchAndRespond(
     else await sendMessage(chatId, txt);
     return;
   }
-  if (latestScope && latestToken && !(await isLatestPageRequest(latestScope, latestToken).catch(() => true))) return;
   const totalPages = Math.ceil(total / PAGE_SIZE);
   const safePage = Math.max(0, Math.min(page, totalPages - 1));
   if (safePage !== page) {
-    return await runSearchAndRespond(chatId, userId, query, safePage, editMessageId, inGroup, qid, latestScope, latestToken);
+    return await runSearchAndRespond(chatId, userId, query, safePage, editMessageId, inGroup, qid, latestScope);
   }
   const header = `🔎 תוצאות עבור: <b>${escapeHtml(query)}</b>\nנמצאו ${total.toLocaleString()} תוצאות${totalPages > 1 ? ` · עמוד ${page + 1}/${totalPages}` : ""}`;
   const botUsername = inGroup ? (await getMe()).username : "";
   const kb = resultsKeyboard(rows as any, page, totalPages, qid, botUsername, inGroup);
-  if (latestScope && latestToken && !(await isLatestPageRequest(latestScope, latestToken).catch(() => true))) return;
   if (editMessageId) {
-    await editMessageText(chatId, editMessageId, header, { reply_markup: kb }).catch(() => {});
-    await setPageState(latestScope || `${chatId}:${editMessageId}`, qid, page).catch(() => {});
+    const edited = await editMessageText(chatId, editMessageId, header, { reply_markup: kb })
+      .then(() => true)
+      .catch(() => false);
+    if (edited) await setPageState(latestScope || `${chatId}:${editMessageId}`, qid, page).catch(() => {});
   } else {
     const sent: any = await sendMessage(chatId, header, { reply_markup: kb });
     if (sent?.message_id) await setPageState(`${chatId}:${sent.message_id}`, qid, page).catch(() => {});
@@ -449,24 +446,42 @@ async function handleCallback(cq: any) {
   }
 
   if (data.startsWith("pg_")) {
-    // pg_<queryId>_n / pg_<queryId>_p (new stable buttons), with old pg_<queryId>_<page> fallback.
+    // pg_<queryId>_<fromPage>_<targetPage>. Source+target makes duplicate taps idempotent.
     const rest = data.slice(3);
-    const idx = rest.lastIndexOf("_");
-    const qid = rest.slice(0, idx);
-    const action = rest.slice(idx + 1);
     const latestScope = `${chatId}:${msg.message_id}`;
-    const current = await getPageState(latestScope).catch(() => null);
-    const currentPage = current?.queryId === qid ? current.page : pageFromMessageText(msg.text);
-    const page = action === "n" ? currentPage + 1 : action === "p" ? currentPage - 1 : Number(action);
+    const parts = rest.split("_");
+    const targetFromParts = Number(parts.at(-1));
+    const sourceFromParts = Number(parts.at(-2));
+    const hasSourceAndTarget =
+      parts.length >= 3 && Number.isFinite(sourceFromParts) && Number.isFinite(targetFromParts);
+    let qid: string;
+    let sourcePage: number | null = null;
+    let page: number;
+    if (hasSourceAndTarget) {
+      qid = parts.slice(0, -2).join("_");
+      sourcePage = sourceFromParts;
+      page = targetFromParts;
+    } else {
+      const idx = rest.lastIndexOf("_");
+      qid = rest.slice(0, idx);
+      const action = rest.slice(idx + 1);
+      const currentPage = pageFromMessageText(msg.text);
+      page = action === "n" ? currentPage + 1 : action === "p" ? currentPage - 1 : Number(action);
+    }
     const cached = await getCachedSearch(qid);
     if (!cached?.query || !Number.isFinite(page) || page < 0) {
       await editMessageText(chatId, msg.message_id, "❌ פג תוקף החיפוש. שלח שוב את שם הסרט.").catch(() => {});
       return;
     }
+    if (sourcePage !== null) {
+      const current = await getPageState(latestScope).catch(() => null);
+      const statePage = current?.queryId === qid ? current.page : null;
+      const textPage = pageFromMessageText(msg.text);
+      if (statePage === page) return;
+      if (statePage !== sourcePage && textPage !== sourcePage) return;
+    }
     const inGroup = msg.chat.type !== "private";
-    const latestToken = `${qid}:${page}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
-    await setLatestPageRequest(latestScope, latestToken).catch(() => {});
-    await runSearchAndRespond(chatId, from.id, cached.query, page, msg.message_id, inGroup, qid, latestScope, latestToken);
+    await runSearchAndRespond(chatId, from.id, cached.query, page, msg.message_id, inGroup, qid, latestScope);
     return;
   }
 

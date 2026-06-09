@@ -37,12 +37,10 @@ import {
   searchMovies,
   setAdminState,
   setPageState,
-  setLatestPageRequest,
   stats,
   updateSettings,
   upsertGroup,
   upsertUser,
-  isLatestPageRequest,
   type BotSettings,
 } from "./db";
 import {
@@ -303,7 +301,6 @@ async function runSearchAndRespond(
   inGroup: boolean,
   queryIdOverride?: string,
   latestScope?: string,
-  latestToken?: string,
 ) {
   let qid = queryIdOverride || shortId(query);
   let cachedPage = await getCachedSearchPage(qid, page, PAGE_SIZE).catch(() => null);
@@ -327,16 +324,14 @@ async function runSearchAndRespond(
     else await sendMessage(chatId, txt);
     return;
   }
-  if (latestScope && latestToken && !(await isLatestPageRequest(latestScope, latestToken).catch(() => true))) return;
   const totalPages = Math.ceil(total / PAGE_SIZE);
   const safePage = Math.max(0, Math.min(page, totalPages - 1));
   if (safePage !== page) {
-    return await runSearchAndRespond(chatId, userId, query, safePage, editMessageId, inGroup, qid, latestScope, latestToken);
+    return await runSearchAndRespond(chatId, userId, query, safePage, editMessageId, inGroup, qid, latestScope);
   }
   const header = `🔎 תוצאות עבור: <b>${escapeHtml(query)}</b>\nנמצאו ${total.toLocaleString()} תוצאות${totalPages > 1 ? ` · עמוד ${page + 1}/${totalPages}` : ""}`;
   const botUsername = inGroup ? (await getMe()).username : "";
   const kb = resultsKeyboard(rows as any, page, totalPages, qid, botUsername, inGroup);
-  if (latestScope && latestToken && !(await isLatestPageRequest(latestScope, latestToken).catch(() => true))) return;
   if (editMessageId) {
     const edited = await editMessageText(chatId, editMessageId, header, { reply_markup: kb })
       .then(() => true)

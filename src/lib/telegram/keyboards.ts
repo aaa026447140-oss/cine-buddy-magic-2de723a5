@@ -53,9 +53,9 @@ export function resultsKeyboard(
   }
   if (totalPages > 1) {
     const nav: any[] = [];
-    if (page > 0) nav.push({ text: "« הקודם", callback_data: `pg_${queryId}_${page - 1}` });
+    if (page > 0) nav.push({ text: "« הקודם", callback_data: `pg_${queryId}_p` });
     nav.push({ text: `${page + 1}/${totalPages}`, callback_data: "noop" });
-    if (page < totalPages - 1) nav.push({ text: "הבא »", callback_data: `pg_${queryId}_${page + 1}` });
+    if (page < totalPages - 1) nav.push({ text: "הבא »", callback_data: `pg_${queryId}_n` });
     rows.push(nav);
   }
   rows.push([

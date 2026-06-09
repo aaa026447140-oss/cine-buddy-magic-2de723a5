@@ -451,24 +451,37 @@ async function handleCallback(cq: any) {
   }
 
   if (data.startsWith("pg_")) {
-    // pg_<queryId>_<targetPage>. Absolute target pages make repeated taps idempotent
-    // and prevent delayed callbacks from advancing two pages at once.
+    // pg_<queryId>_<fromPage>_<targetPage>. Source+target makes duplicate taps idempotent.
     const rest = data.slice(3);
-    const idx = rest.lastIndexOf("_");
-    const qid = rest.slice(0, idx);
-    const action = rest.slice(idx + 1);
     const latestScope = `${chatId}:${msg.message_id}`;
-    const numericPage = Number(action);
-    let page = numericPage;
-    if (!Number.isFinite(numericPage)) {
-      const current = await getPageState(latestScope).catch(() => null);
-      const currentPage = current?.queryId === qid ? current.page : pageFromMessageText(msg.text);
-      page = action === "n" ? currentPage + 1 : action === "p" ? currentPage - 1 : NaN;
+    const parts = rest.split("_");
+    const targetFromParts = Number(parts.at(-1));
+    const sourceFromParts = Number(parts.at(-2));
+    const hasSourceAndTarget = parts.length >= 3 && Number.isFinite(sourceFromParts) && Number.isFinite(targetFromParts);
+    let qid: string;
+    let sourcePage: number | null = null;
+    let page: number;
+    if (hasSourceAndTarget) {
+      qid = parts.slice(0, -2).join("_");
+      sourcePage = sourceFromParts;
+      page = targetFromParts;
+    } else {
+      const idx = rest.lastIndexOf("_");
+      qid = rest.slice(0, idx);
+      const action = rest.slice(idx + 1);
+      const currentPage = pageFromMessageText(msg.text);
+      page = action === "n" ? currentPage + 1 : action === "p" ? currentPage - 1 : Number(action);
     }
     const cached = await getCachedSearch(qid);
     if (!cached?.query || !Number.isFinite(page) || page < 0) {
       await editMessageText(chatId, msg.message_id, "❌ פג תוקף החיפוש. שלח שוב את שם הסרט.").catch(() => {});
       return;
+    }
+    if (sourcePage !== null) {
+      const current = await getPageState(latestScope).catch(() => null);
+      const currentPage = current?.queryId === qid ? current.page : pageFromMessageText(msg.text);
+      if (currentPage !== sourcePage) return;
+      await setPageState(latestScope, qid, page).catch(() => {});
     }
     const inGroup = msg.chat.type !== "private";
     const latestToken = `${qid}:${page}:${Date.now()}:${Math.random().toString(36).slice(2)}`;

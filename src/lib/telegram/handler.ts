@@ -18,6 +18,7 @@ import {
   cacheSearchPage,
   getCachedSearch,
   getCachedSearchPage,
+  getPageState,
   getAdminState,
   getMovieById,
   getSettings,
@@ -35,6 +36,7 @@ import {
   removeSourceChannel,
   searchMovies,
   setAdminState,
+  setPageState,
   setLatestPageRequest,
   stats,
   updateSettings,
@@ -337,8 +339,10 @@ async function runSearchAndRespond(
   if (latestScope && latestToken && !(await isLatestPageRequest(latestScope, latestToken).catch(() => true))) return;
   if (editMessageId) {
     await editMessageText(chatId, editMessageId, header, { reply_markup: kb }).catch(() => {});
+    await setPageState(latestScope || `${chatId}:${editMessageId}`, qid, page).catch(() => {});
   } else {
-    await sendMessage(chatId, header, { reply_markup: kb });
+    const sent: any = await sendMessage(chatId, header, { reply_markup: kb });
+    if (sent?.message_id) await setPageState(`${chatId}:${sent.message_id}`, qid, page).catch(() => {});
   }
 }
 
@@ -445,18 +449,21 @@ async function handleCallback(cq: any) {
   }
 
   if (data.startsWith("pg_")) {
-    // pg_<queryId>_<page>
+    // pg_<queryId>_n / pg_<queryId>_p (new stable buttons), with old pg_<queryId>_<page> fallback.
     const rest = data.slice(3);
     const idx = rest.lastIndexOf("_");
     const qid = rest.slice(0, idx);
-    const page = Number(rest.slice(idx + 1));
+    const action = rest.slice(idx + 1);
+    const latestScope = `${chatId}:${msg.message_id}`;
+    const current = await getPageState(latestScope).catch(() => null);
+    const currentPage = current?.queryId === qid ? current.page : pageFromMessageText(msg.text);
+    const page = action === "n" ? currentPage + 1 : action === "p" ? currentPage - 1 : Number(action);
     const cached = await getCachedSearch(qid);
     if (!cached?.query || !Number.isFinite(page) || page < 0) {
       await editMessageText(chatId, msg.message_id, "❌ פג תוקף החיפוש. שלח שוב את שם הסרט.").catch(() => {});
       return;
     }
     const inGroup = msg.chat.type !== "private";
-    const latestScope = `${chatId}:${msg.message_id}`;
     const latestToken = `${qid}:${page}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
     await setLatestPageRequest(latestScope, latestToken).catch(() => {});
     await runSearchAndRespond(chatId, from.id, cached.query, page, msg.message_id, inGroup, qid, latestScope, latestToken);

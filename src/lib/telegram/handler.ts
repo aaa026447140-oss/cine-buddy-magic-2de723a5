@@ -457,7 +457,8 @@ async function handleCallback(cq: any) {
     const parts = rest.split("_");
     const targetFromParts = Number(parts.at(-1));
     const sourceFromParts = Number(parts.at(-2));
-    const hasSourceAndTarget = parts.length >= 3 && Number.isFinite(sourceFromParts) && Number.isFinite(targetFromParts);
+    const hasSourceAndTarget =
+      parts.length >= 3 && Number.isFinite(sourceFromParts) && Number.isFinite(targetFromParts);
     let qid: string;
     let sourcePage: number | null = null;
     let page: number;
@@ -481,7 +482,6 @@ async function handleCallback(cq: any) {
       const current = await getPageState(latestScope).catch(() => null);
       const currentPage = current?.queryId === qid ? current.page : pageFromMessageText(msg.text);
       if (currentPage !== sourcePage) return;
-      await setPageState(latestScope, qid, page).catch(() => {});
     }
     const inGroup = msg.chat.type !== "private";
     const latestToken = `${qid}:${page}:${Date.now()}:${Math.random().toString(36).slice(2)}`;

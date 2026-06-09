@@ -338,8 +338,10 @@ async function runSearchAndRespond(
   const kb = resultsKeyboard(rows as any, page, totalPages, qid, botUsername, inGroup);
   if (latestScope && latestToken && !(await isLatestPageRequest(latestScope, latestToken).catch(() => true))) return;
   if (editMessageId) {
-    await editMessageText(chatId, editMessageId, header, { reply_markup: kb }).catch(() => {});
-    await setPageState(latestScope || `${chatId}:${editMessageId}`, qid, page).catch(() => {});
+    const edited = await editMessageText(chatId, editMessageId, header, { reply_markup: kb })
+      .then(() => true)
+      .catch(() => false);
+    if (edited) await setPageState(latestScope || `${chatId}:${editMessageId}`, qid, page).catch(() => {});
   } else {
     const sent: any = await sendMessage(chatId, header, { reply_markup: kb });
     if (sent?.message_id) await setPageState(`${chatId}:${sent.message_id}`, qid, page).catch(() => {});
@@ -449,15 +451,20 @@ async function handleCallback(cq: any) {
   }
 
   if (data.startsWith("pg_")) {
-    // pg_<queryId>_n / pg_<queryId>_p (new stable buttons), with old pg_<queryId>_<page> fallback.
+    // pg_<queryId>_<targetPage>. Absolute target pages make repeated taps idempotent
+    // and prevent delayed callbacks from advancing two pages at once.
     const rest = data.slice(3);
     const idx = rest.lastIndexOf("_");
     const qid = rest.slice(0, idx);
     const action = rest.slice(idx + 1);
     const latestScope = `${chatId}:${msg.message_id}`;
-    const current = await getPageState(latestScope).catch(() => null);
-    const currentPage = current?.queryId === qid ? current.page : pageFromMessageText(msg.text);
-    const page = action === "n" ? currentPage + 1 : action === "p" ? currentPage - 1 : Number(action);
+    const numericPage = Number(action);
+    let page = numericPage;
+    if (!Number.isFinite(numericPage)) {
+      const current = await getPageState(latestScope).catch(() => null);
+      const currentPage = current?.queryId === qid ? current.page : pageFromMessageText(msg.text);
+      page = action === "n" ? currentPage + 1 : action === "p" ? currentPage - 1 : NaN;
+    }
     const cached = await getCachedSearch(qid);
     if (!cached?.query || !Number.isFinite(page) || page < 0) {
       await editMessageText(chatId, msg.message_id, "❌ פג תוקף החיפוש. שלח שוב את שם הסרט.").catch(() => {});

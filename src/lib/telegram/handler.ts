@@ -479,9 +479,7 @@ async function handleCallback(cq: any) {
       if (currentPage !== sourcePage) return;
     }
     const inGroup = msg.chat.type !== "private";
-    const latestToken = `${qid}:${page}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
-    await setLatestPageRequest(latestScope, latestToken).catch(() => {});
-    await runSearchAndRespond(chatId, from.id, cached.query, page, msg.message_id, inGroup, qid, latestScope, latestToken);
+    await runSearchAndRespond(chatId, from.id, cached.query, page, msg.message_id, inGroup, qid, latestScope);
     return;
   }
 

@@ -222,7 +222,12 @@ export async function isSourceChannel(chat_id: number): Promise<boolean> {
 // ───── Query cache (pagination) ─────
 export type CachedSearch = { query: string; total?: number };
 export type CachedSearchPage = { rows: any[]; total: number };
-export type CachedPageState = { queryId: string; page: number };
+export type CachedPageState = {
+  queryId: string;
+  page: number;
+  status: "rendered" | "pending";
+  requestedAt: number;
+};
 
 export async function cacheQuery(id: string, query: string, total?: number) {
   const value = JSON.stringify({ kind: "search", query, total, cached_at: Date.now() });
@@ -265,9 +270,9 @@ export async function getCachedSearchPage(id: string, page: number, pageSize: nu
   }
   return null;
 }
-export async function setPageState(scope: string, queryId: string, page: number) {
+export async function setPageState(scope: string, queryId: string, page: number, status: "rendered" | "pending" = "rendered") {
   await admin().from("query_cache").upsert(
-    { id: pageStateId(scope), query: JSON.stringify({ kind: "page_state", queryId, page }), created_at: new Date().toISOString() },
+    { id: pageStateId(scope), query: JSON.stringify({ kind: "page_state", queryId, page, status, requestedAt: Date.now() }), created_at: new Date().toISOString() },
     { onConflict: "id" },
   );
 }
@@ -278,7 +283,12 @@ export async function getPageState(scope: string): Promise<CachedPageState | nul
   try {
     const parsed = JSON.parse(value);
     if (parsed?.kind === "page_state" && typeof parsed.queryId === "string" && typeof parsed.page === "number") {
-      return { queryId: parsed.queryId, page: parsed.page };
+      return {
+        queryId: parsed.queryId,
+        page: parsed.page,
+        status: parsed.status === "pending" ? "pending" : "rendered",
+        requestedAt: typeof parsed.requestedAt === "number" ? parsed.requestedAt : 0,
+      };
     }
   } catch {
     return null;

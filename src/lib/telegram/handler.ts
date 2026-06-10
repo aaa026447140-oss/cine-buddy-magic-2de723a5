@@ -480,6 +480,10 @@ async function handleCallback(cq: any) {
       if (statePage === page) return;
       if (statePage !== sourcePage && textPage !== sourcePage) return;
     }
+    // Lock this message to the target page before doing the expensive search.
+    // That makes repeated taps on the same old "next" button no-op instead of
+    // queueing another navigation that can arrive late and look like a skip/stuck page.
+    await setPageState(latestScope, qid, page).catch(() => {});
     const inGroup = msg.chat.type !== "private";
     await runSearchAndRespond(chatId, from.id, cached.query, page, msg.message_id, inGroup, qid, latestScope);
     return;

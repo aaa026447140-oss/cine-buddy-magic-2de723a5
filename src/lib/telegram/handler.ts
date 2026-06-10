@@ -18,7 +18,6 @@ import {
   cacheSearchPage,
   getCachedSearch,
   getCachedSearchPage,
-  getPageState,
   getAdminState,
   getMovieById,
   getSettings,
@@ -446,45 +445,18 @@ async function handleCallback(cq: any) {
   }
 
   if (data.startsWith("pg_")) {
-    // pg_<queryId>_<fromPage>_<targetPage>. Source+target makes duplicate taps idempotent.
     const rest = data.slice(3);
     const latestScope = `${chatId}:${msg.message_id}`;
-    const parts = rest.split("_");
-    const targetFromParts = Number(parts.at(-1));
-    const sourceFromParts = Number(parts.at(-2));
-    const hasSourceAndTarget =
-      parts.length >= 3 && Number.isFinite(sourceFromParts) && Number.isFinite(targetFromParts);
-    let qid: string;
-    let sourcePage: number | null = null;
-    let page: number;
-    if (hasSourceAndTarget) {
-      qid = parts.slice(0, -2).join("_");
-      sourcePage = sourceFromParts;
-      page = targetFromParts;
-    } else {
-      const idx = rest.lastIndexOf("_");
-      qid = rest.slice(0, idx);
-      const action = rest.slice(idx + 1);
-      const currentPage = pageFromMessageText(msg.text);
-      page = action === "n" ? currentPage + 1 : action === "p" ? currentPage - 1 : Number(action);
-    }
+    const idx = rest.lastIndexOf("_");
+    const qid = rest.slice(0, idx);
+    const action = rest.slice(idx + 1);
+    const currentPage = pageFromMessageText(msg.text);
+    const page = action === "n" ? currentPage + 1 : action === "p" ? currentPage - 1 : Number(action);
     const cached = await getCachedSearch(qid);
     if (!cached?.query || !Number.isFinite(page) || page < 0) {
       await editMessageText(chatId, msg.message_id, "❌ פג תוקף החיפוש. שלח שוב את שם הסרט.").catch(() => {});
       return;
     }
-    if (sourcePage !== null) {
-      const current = await getPageState(latestScope).catch(() => null);
-      const statePage = current?.queryId === qid ? current.page : null;
-      const textPage = pageFromMessageText(msg.text);
-      if (current?.queryId === qid && current.status === "pending" && Date.now() - current.requestedAt < 15000) return;
-      if (statePage === page && textPage === page) return;
-      if (statePage !== sourcePage && textPage !== sourcePage) return;
-    }
-    // Lock this message to the target page before doing the expensive search.
-    // That makes repeated taps on the same old "next" button no-op instead of
-    // queueing another navigation that can arrive late and look like a skip/stuck page.
-    await setPageState(latestScope, qid, page, "pending").catch(() => {});
     const inGroup = msg.chat.type !== "private";
     await runSearchAndRespond(chatId, from.id, cached.query, page, msg.message_id, inGroup, qid, latestScope);
     return;

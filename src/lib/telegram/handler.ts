@@ -477,7 +477,7 @@ async function handleCallback(cq: any) {
       const current = await getPageState(latestScope).catch(() => null);
       const statePage = current?.queryId === qid ? current.page : null;
       const textPage = pageFromMessageText(msg.text);
-      if (statePage === page) return;
+      if (statePage === page && textPage === page) return;
       if (statePage !== sourcePage && textPage !== sourcePage) return;
     }
     // Lock this message to the target page before doing the expensive search.

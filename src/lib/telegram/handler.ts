@@ -18,7 +18,6 @@ import {
   cacheSearchPage,
   getCachedSearch,
   getCachedSearchPage,
-  getPageState,
   getAdminState,
   getMovieById,
   getSettings,

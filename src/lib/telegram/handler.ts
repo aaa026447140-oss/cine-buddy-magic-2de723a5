@@ -381,7 +381,7 @@ async function handleCallback(cq: any) {
   }
 
   // Always ack pagination/get callbacks immediately so the spinner clears fast.
-  if (data.startsWith("pg_") || data.startsWith("get_")) {
+  if (data.startsWith("pg2:") || data.startsWith("pg_") || data.startsWith("get_")) {
     answerCallbackQuery(cq.id).catch(() => {});
   }
 
@@ -441,6 +441,19 @@ async function handleCallback(cq: any) {
     } else {
       await answerCallbackQuery(cq.id, { text: "❌ עדיין לא הצטרפת לערוץ", show_alert: true });
     }
+    return;
+  }
+
+  if (data.startsWith("pg2:")) {
+    const [, qid, pageText] = data.split(":");
+    const page = Number(pageText);
+    const cached = await getCachedSearch(qid);
+    if (!cached?.query || !Number.isInteger(page) || page < 0) {
+      await editMessageText(chatId, msg.message_id, "❌ פג תוקף החיפוש. שלח שוב את שם הסרט.").catch(() => {});
+      return;
+    }
+    const inGroup = msg.chat.type !== "private";
+    await runSearchAndRespond(chatId, from.id, cached.query, page, msg.message_id, inGroup, qid, `${chatId}:${msg.message_id}`);
     return;
   }
 

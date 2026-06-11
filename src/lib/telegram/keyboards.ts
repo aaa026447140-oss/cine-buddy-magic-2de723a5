@@ -53,9 +53,9 @@ export function resultsKeyboard(
   }
   if (totalPages > 1) {
     const nav: any[] = [];
-    if (page > 0) nav.push({ text: "⬅️ הקודם", callback_data: `pg2:${queryId}:${page - 1}` });
-    nav.push({ text: `${page + 1}/${totalPages}`, callback_data: "noop" });
-    if (page < totalPages - 1) nav.push({ text: "הבא ➡️", callback_data: `pg2:${queryId}:${page + 1}` });
+    if (page > 0) nav.push({ text: "⬅️ הקודם", callback_data: pageCallback(queryId, page - 1) });
+    nav.push({ text: `${page + 1}/${totalPages}`, callback_data: pageCallback(queryId, page) });
+    if (page < totalPages - 1) nav.push({ text: "הבא ➡️", callback_data: pageCallback(queryId, page + 1) });
     rows.push(nav);
   }
   rows.push([
@@ -119,6 +119,10 @@ export function adminsListKeyboard(admins: { telegram_id: number; expires_at: st
 function truncate(s: string, n: number) {
   s = s.replace(/\s+/g, " ").trim();
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
+}
+
+function pageCallback(queryId: string, page: number) {
+  return `nav:${queryId}:${page}`;
 }
 
 // Telegram callback_data max 64 bytes. Encode query as base64url, cap length.

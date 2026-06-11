@@ -456,6 +456,7 @@ async function handleCallback(cq: any) {
       await sendMessage(chatId, "❌ פג תוקף החיפוש. שלח שוב את שם הסרט.").catch(() => {});
       return;
     }
+    if (page === pageFromMessageText(msg.text)) return;
     const inGroup = msg.chat.type !== "private";
     await runSearchAndRespond(chatId, from.id, cached.query, page, msg.message_id, inGroup, qid, `${chatId}:${msg.message_id}`);
     return;
@@ -469,6 +470,7 @@ async function handleCallback(cq: any) {
       await editMessageText(chatId, msg.message_id, "❌ פג תוקף החיפוש. שלח שוב את שם הסרט.").catch(() => {});
       return;
     }
+    if (page === pageFromMessageText(msg.text)) return;
     const inGroup = msg.chat.type !== "private";
     await runSearchAndRespond(chatId, from.id, cached.query, page, msg.message_id, inGroup, qid, `${chatId}:${msg.message_id}`);
     return;

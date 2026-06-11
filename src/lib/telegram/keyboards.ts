@@ -54,7 +54,7 @@ export function resultsKeyboard(
   if (totalPages > 1) {
     const nav: any[] = [];
     if (page > 0) nav.push({ text: "⬅️ הקודם", callback_data: pageCallback(queryId, page - 1) });
-    nav.push({ text: `${page + 1}/${totalPages}`, callback_data: pageCallback(queryId, page) });
+    nav.push({ text: `${page + 1}/${totalPages}`, callback_data: "noop" });
     if (page < totalPages - 1) nav.push({ text: "הבא ➡️", callback_data: pageCallback(queryId, page + 1) });
     rows.push(nav);
   }
@@ -117,8 +117,27 @@ export function adminsListKeyboard(admins: { telegram_id: number; expires_at: st
 }
 
 function truncate(s: string, n: number) {
-  s = s.replace(/\s+/g, " ").trim();
-  return s.length > n ? s.slice(0, n - 1) + "…" : s;
+  s = cleanButtonText(s);
+  const chars = Array.from(s);
+  return chars.length > n ? chars.slice(0, n - 1).join("") + "…" : s;
+}
+
+function cleanButtonText(value: string) {
+  let out = "";
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        out += value[i] + value[i + 1];
+        i++;
+      }
+      continue;
+    }
+    if (code >= 0xdc00 && code <= 0xdfff) continue;
+    out += value[i];
+  }
+  return out.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").replace(/\s+/g, " ").trim() || "ללא שם";
 }
 
 function pageCallback(queryId: string, page: number) {

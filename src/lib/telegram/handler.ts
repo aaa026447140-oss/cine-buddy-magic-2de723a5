@@ -314,9 +314,11 @@ async function runSearchAndRespond(
     total = fresh.total;
     await Promise.all([
       cacheQuery(qid, query, total).catch(() => {}),
-      cacheSearchPage(qid, page, PAGE_SIZE, rows, total).catch(() => {}),
+      cacheSearchPage(qid, page, PAGE_SIZE, rows ?? [], total ?? 0).catch(() => {}),
     ]);
   }
+  rows = rows ?? [];
+  total = total ?? 0;
   if (total === 0) {
     const txt = `❌ לא נמצאו תוצאות עבור: <b>${escapeHtml(query)}</b>`;
     if (editMessageId) await editMessageText(chatId, editMessageId, txt).catch(() => {});

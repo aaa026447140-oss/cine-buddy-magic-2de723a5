@@ -100,15 +100,14 @@ export async function searchMovies(query: string, page: number, pageSize: number
   // so "עונה 6" requires both "עונה" and "6" to appear, not either one.
   const words = q.split(/\s+/).filter(Boolean).slice(0, 6);
   const includeCount = opts.includeCount !== false;
-  let req = admin()
+  let req: any = admin()
     .from("movies")
     .select("id,title,message_id,source_channel_id", includeCount ? { count: "exact" } : {});
   for (const w of words) {
     const esc = w.replace(/[%_,()]/g, "\\$&");
     req = req.or(`title.ilike.%${esc}%,raw_caption.ilike.%${esc}%`);
   }
-  req = req.order("id", { ascending: false }).range(from, to);
-  const { data, error, count } = await req;
+  const { data, error, count } = await req.order("id", { ascending: false }).range(from, to);
   if (error) throw error;
   return { rows: data ?? [], total: includeCount ? (count ?? 0) : (opts.knownTotal ?? 0) };
 }

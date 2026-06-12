@@ -314,7 +314,7 @@ async function runSearchAndRespond(
     total = fresh.total;
     await Promise.all([
       cacheQuery(qid, query, total).catch(() => {}),
-      cacheSearchPage(qid, page, PAGE_SIZE, rows, total).catch(() => {}),
+      cacheSearchPage(qid, page, PAGE_SIZE, rows ?? [], total ?? 0).catch(() => {}),
     ]);
   }
   rows = rows ?? [];

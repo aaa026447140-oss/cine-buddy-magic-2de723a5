@@ -91,25 +91,153 @@ export async function indexMovie(m: {
   await admin().from("movies").upsert(m as any, { onConflict: "source_channel_id,message_id" });
 }
 
+const SEARCH_WORD_LIMIT = 6;
+const REGULAR_SEARCH_BATCH = 1000;
+const REGULAR_SEARCH_SCAN_LIMIT = 12000;
+
+type SearchMovieRow = {
+  id: number;
+  title: string;
+  message_id: number;
+  source_channel_id: number;
+  raw_caption?: string | null;
+};
+
+type ParsedRegularSearch = {
+  keywords: string[];
+  seasonNumbers: number[];
+  episodeNumbers: number[];
+  genericNumbers: number[];
+  hasNumberFilters: boolean;
+};
+
 export async function searchMovies(query: string, page: number, pageSize: number, opts: { includeCount?: boolean; knownTotal?: number } = {}) {
   const q = query.trim();
   if (!q) return { rows: [] as any[], total: 0 };
+  const parsed = parseRegularSearch(q);
+  if (parsed.hasNumberFilters) return searchMoviesRegular(q, parsed, page, pageSize);
+  return searchMoviesByWords(q, page, pageSize, opts);
+}
+
+async function searchMoviesByWords(query: string, page: number, pageSize: number, opts: { includeCount?: boolean; knownTotal?: number }) {
   const from = page * pageSize;
   const to = from + pageSize - 1;
-  // Each word must match (in title OR caption); words are AND-ed together
-  // so "עונה 6" requires both "עונה" and "6" to appear, not either one.
-  const words = q.split(/\s+/).filter(Boolean).slice(0, 6);
+  const words = query.split(/\s+/).filter(Boolean).slice(0, SEARCH_WORD_LIMIT);
   const includeCount = opts.includeCount !== false;
   let req: any = admin()
     .from("movies")
     .select("id,title,message_id,source_channel_id", includeCount ? { count: "exact" } : {});
-  for (const w of words) {
-    const esc = w.replace(/[%_,()]/g, "\\$&");
-    req = req.or(`title.ilike.%${esc}%,raw_caption.ilike.%${esc}%`);
-  }
+  for (const w of words) req = req.or(ilikeAnyField(w));
   const { data, error, count } = await req.order("id", { ascending: false }).range(from, to);
   if (error) throw error;
   return { rows: data ?? [], total: includeCount ? (count ?? 0) : (opts.knownTotal ?? 0) };
+}
+
+async function searchMoviesRegular(query: string, parsed: ParsedRegularSearch, page: number, pageSize: number) {
+  const candidates: SearchMovieRow[] = [];
+  for (let from = 0; from < REGULAR_SEARCH_SCAN_LIMIT; from += REGULAR_SEARCH_BATCH) {
+    const to = Math.min(from + REGULAR_SEARCH_BATCH - 1, REGULAR_SEARCH_SCAN_LIMIT - 1);
+    const { data, error } = await buildRegularSearchRequest(query, parsed).range(from, to);
+    if (error) throw error;
+    const batch = (data ?? []) as SearchMovieRow[];
+    candidates.push(...batch);
+    if (batch.length < REGULAR_SEARCH_BATCH) break;
+  }
+  const filtered = candidates
+    .filter((row) => matchesRegularSearch(row, parsed))
+    .map((row) => ({ row, score: regularSearchScore(row, parsed) }))
+    .sort((a, b) => b.score - a.score || Number(b.row.id) - Number(a.row.id))
+    .map(({ row }) => ({ id: row.id, title: row.title, message_id: row.message_id, source_channel_id: row.source_channel_id }));
+  const from = page * pageSize;
+  return { rows: filtered.slice(from, from + pageSize), total: filtered.length };
+}
+
+function buildRegularSearchRequest(query: string, parsed: ParsedRegularSearch): any {
+  let req: any = admin().from("movies").select("id,title,message_id,source_channel_id,raw_caption");
+  for (const word of parsed.keywords.slice(0, SEARCH_WORD_LIMIT)) req = req.or(ilikeAnyField(word));
+  if (parsed.keywords.length === 0) {
+    const numericConditions = numericBaseConditions(parsed);
+    if (numericConditions.length > 0) req = req.or(numericConditions.join(","));
+    else for (const w of query.split(/\s+/).filter(Boolean).slice(0, SEARCH_WORD_LIMIT)) req = req.or(ilikeAnyField(w));
+  }
+  return req.order("id", { ascending: false });
+}
+
+function ilikeAnyField(value: string) {
+  const esc = escapePostgrestLike(value);
+  return `title.ilike.%${esc}%,raw_caption.ilike.%${esc}%`;
+}
+
+function numericBaseConditions(parsed: ParsedRegularSearch) {
+  const conditions: string[] = [];
+  const add = (field: "title" | "raw_caption", phrase: string) => conditions.push(`${field}.ilike.%${escapePostgrestLike(phrase)}%`);
+  for (const n of parsed.seasonNumbers) {
+    for (const form of numericForms(n)) {
+      add("title", `עונה ${form}`);
+      add("raw_caption", `עונה ${form}`);
+      add("title", `season ${form}`);
+      add("raw_caption", `season ${form}`);
+    }
+  }
+  for (const n of parsed.episodeNumbers) {
+    for (const form of numericForms(n)) {
+      add("title", `פרק ${form}`);
+      add("raw_caption", `פרק ${form}`);
+      add("title", `episode ${form}`);
+      add("raw_caption", `episode ${form}`);
+    }
+  }
+  for (const n of parsed.genericNumbers) {
+    for (const form of numericForms(n)) {
+      add("title", form);
+      add("raw_caption", form);
+    }
+  }
+  return conditions.slice(0, 80);
+}
+
+function parseRegularSearch(query: string): ParsedRegularSearch {
+  const tokens = tokenizeSearch(query);
+  const used = new Set<number>();
+  const seasonNumbers: number[] = [];
+  const episodeNumbers: number[] = [];
+  const genericNumbers: number[] = [];
+
+  for (let i = 0; i < tokens.length; i++) {
+    const compact = parseCompactContext(tokens[i]);
+    if (compact) {
+      (compact.kind === "season" ? seasonNumbers : episodeNumbers).push(compact.value);
+      used.add(i);
+      continue;
+    }
+    const context = contextKind(tokens[i]);
+    if (!context || i + 1 >= tokens.length) continue;
+    const value = numberValue(tokens[i + 1]);
+    if (value === null) continue;
+    (context === "season" ? seasonNumbers : episodeNumbers).push(value);
+    used.add(i);
+    used.add(i + 1);
+  }
+
+  const keywords: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (!token || used.has(i) || contextKind(token) || SEARCH_STOP_WORDS.has(token)) continue;
+    const n = numberValue(token);
+    if (n !== null) {
+      genericNumbers.push(n);
+      continue;
+    }
+    if (token.length >= 2) keywords.push(token);
+  }
+
+  return {
+    keywords: unique(keywords).slice(0, SEARCH_WORD_LIMIT),
+    seasonNumbers: uniqueNumbers(seasonNumbers),
+    episodeNumbers: uniqueNumbers(episodeNumbers),
+    genericNumbers: uniqueNumbers(genericNumbers),
+    hasNumberFilters: seasonNumbers.length > 0 || episodeNumbers.length > 0 || genericNumbers.length > 0,
+  };
 }
 
 export async function getMovieById(id: number) {

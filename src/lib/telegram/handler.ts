@@ -301,7 +301,7 @@ async function runSearchAndRespond(
   queryIdOverride?: string,
   latestScope?: string,
 ) {
-  let qid = queryIdOverride || shortId(query);
+  let qid = queryIdOverride || shortId(`regular-search-v2:${query}`);
   let cachedPage = await getCachedSearchPage(qid, page, PAGE_SIZE).catch(() => null);
   let rows = cachedPage?.rows;
   let total = cachedPage?.total;

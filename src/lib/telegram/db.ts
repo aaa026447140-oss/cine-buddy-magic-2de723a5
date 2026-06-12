@@ -91,25 +91,243 @@ export async function indexMovie(m: {
   await admin().from("movies").upsert(m as any, { onConflict: "source_channel_id,message_id" });
 }
 
+const SEARCH_WORD_LIMIT = 6;
+const REGULAR_SEARCH_BATCH = 1000;
+const REGULAR_SEARCH_SCAN_LIMIT = 12000;
+
+type SearchMovieRow = {
+  id: number;
+  title: string;
+  message_id: number;
+  source_channel_id: number;
+  raw_caption?: string | null;
+};
+
+type ParsedRegularSearch = {
+  keywords: string[];
+  seasonNumbers: number[];
+  episodeNumbers: number[];
+  genericNumbers: number[];
+  hasNumberFilters: boolean;
+};
+
 export async function searchMovies(query: string, page: number, pageSize: number, opts: { includeCount?: boolean; knownTotal?: number } = {}) {
   const q = query.trim();
   if (!q) return { rows: [] as any[], total: 0 };
+  const parsed = parseRegularSearch(q);
+  if (parsed.hasNumberFilters) return searchMoviesRegular(q, parsed, page, pageSize);
+  return searchMoviesByWords(q, page, pageSize, opts);
+}
+
+async function searchMoviesByWords(query: string, page: number, pageSize: number, opts: { includeCount?: boolean; knownTotal?: number }) {
   const from = page * pageSize;
   const to = from + pageSize - 1;
-  // Each word must match (in title OR caption); words are AND-ed together
-  // so "עונה 6" requires both "עונה" and "6" to appear, not either one.
-  const words = q.split(/\s+/).filter(Boolean).slice(0, 6);
+  const words = query.split(/\s+/).filter(Boolean).slice(0, SEARCH_WORD_LIMIT);
   const includeCount = opts.includeCount !== false;
   let req: any = admin()
     .from("movies")
     .select("id,title,message_id,source_channel_id", includeCount ? { count: "exact" } : {});
-  for (const w of words) {
-    const esc = w.replace(/[%_,()]/g, "\\$&");
-    req = req.or(`title.ilike.%${esc}%,raw_caption.ilike.%${esc}%`);
-  }
+  for (const w of words) req = req.or(ilikeAnyField(w));
   const { data, error, count } = await req.order("id", { ascending: false }).range(from, to);
   if (error) throw error;
   return { rows: data ?? [], total: includeCount ? (count ?? 0) : (opts.knownTotal ?? 0) };
+}
+
+async function searchMoviesRegular(query: string, parsed: ParsedRegularSearch, page: number, pageSize: number) {
+  const candidates: SearchMovieRow[] = [];
+  for (let from = 0; from < REGULAR_SEARCH_SCAN_LIMIT; from += REGULAR_SEARCH_BATCH) {
+    const to = Math.min(from + REGULAR_SEARCH_BATCH - 1, REGULAR_SEARCH_SCAN_LIMIT - 1);
+    const { data, error } = await buildRegularSearchRequest(query, parsed).range(from, to);
+    if (error) throw error;
+    const batch = (data ?? []) as SearchMovieRow[];
+    candidates.push(...batch);
+    if (batch.length < REGULAR_SEARCH_BATCH) break;
+  }
+  const filtered = candidates
+    .filter((row) => matchesRegularSearch(row, parsed))
+    .map((row) => ({ row, score: regularSearchScore(row, parsed) }))
+    .sort((a, b) => b.score - a.score || Number(b.row.id) - Number(a.row.id))
+    .map(({ row }) => ({ id: row.id, title: row.title, message_id: row.message_id, source_channel_id: row.source_channel_id }));
+  const from = page * pageSize;
+  return { rows: filtered.slice(from, from + pageSize), total: filtered.length };
+}
+
+function buildRegularSearchRequest(query: string, parsed: ParsedRegularSearch): any {
+  let req: any = admin().from("movies").select("id,title,message_id,source_channel_id,raw_caption");
+  for (const word of parsed.keywords.slice(0, SEARCH_WORD_LIMIT)) req = req.or(ilikeAnyField(word));
+  if (parsed.keywords.length === 0) {
+    const numericConditions = numericBaseConditions(parsed);
+    if (numericConditions.length > 0) req = req.or(numericConditions.join(","));
+    else for (const w of query.split(/\s+/).filter(Boolean).slice(0, SEARCH_WORD_LIMIT)) req = req.or(ilikeAnyField(w));
+  }
+  return req.order("id", { ascending: false });
+}
+
+function ilikeAnyField(value: string) {
+  const esc = escapePostgrestLike(value);
+  return `title.ilike.%${esc}%,raw_caption.ilike.%${esc}%`;
+}
+
+function numericBaseConditions(parsed: ParsedRegularSearch) {
+  const conditions: string[] = [];
+  const add = (field: "title" | "raw_caption", phrase: string) => conditions.push(`${field}.ilike.%${escapePostgrestLike(phrase)}%`);
+  for (const n of parsed.seasonNumbers) {
+    for (const form of numericForms(n)) {
+      add("title", `עונה ${form}`);
+      add("raw_caption", `עונה ${form}`);
+      add("title", `season ${form}`);
+      add("raw_caption", `season ${form}`);
+    }
+  }
+  for (const n of parsed.episodeNumbers) {
+    for (const form of numericForms(n)) {
+      add("title", `פרק ${form}`);
+      add("raw_caption", `פרק ${form}`);
+      add("title", `episode ${form}`);
+      add("raw_caption", `episode ${form}`);
+    }
+  }
+  for (const n of parsed.genericNumbers) {
+    for (const form of numericForms(n)) {
+      add("title", form);
+      add("raw_caption", form);
+    }
+  }
+  return conditions.slice(0, 80);
+}
+
+function parseRegularSearch(query: string): ParsedRegularSearch {
+  const tokens = tokenizeSearch(query);
+  const used = new Set<number>();
+  const seasonNumbers: number[] = [];
+  const episodeNumbers: number[] = [];
+  const genericNumbers: number[] = [];
+
+  for (let i = 0; i < tokens.length; i++) {
+    const compact = parseCompactContext(tokens[i]);
+    if (compact) {
+      (compact.kind === "season" ? seasonNumbers : episodeNumbers).push(compact.value);
+      used.add(i);
+      continue;
+    }
+    const context = contextKind(tokens[i]);
+    if (!context || i + 1 >= tokens.length) continue;
+    const value = numberValue(tokens[i + 1]);
+    if (value === null) continue;
+    (context === "season" ? seasonNumbers : episodeNumbers).push(value);
+    used.add(i);
+    used.add(i + 1);
+  }
+
+  const keywords: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (!token || used.has(i) || contextKind(token) || SEARCH_STOP_WORDS.has(token)) continue;
+    const n = numberValue(token);
+    if (n !== null) {
+      genericNumbers.push(n);
+      continue;
+    }
+    if (token.length >= 2) keywords.push(token);
+  }
+
+  return {
+    keywords: unique(keywords).slice(0, SEARCH_WORD_LIMIT),
+    seasonNumbers: uniqueNumbers(seasonNumbers),
+    episodeNumbers: uniqueNumbers(episodeNumbers),
+    genericNumbers: uniqueNumbers(genericNumbers),
+    hasNumberFilters: seasonNumbers.length > 0 || episodeNumbers.length > 0 || genericNumbers.length > 0,
+  };
+}
+
+const SEARCH_STOP_WORDS = new Set(["את", "של", "עם", "סדרה", "הסדרה", "סרט", "הסרט", "season", "episode"]);
+const HEBREW_NUMBER_WORDS: Record<string, number> = {
+  "אחד": 1, "אחת": 1, "ראשון": 1, "ראשונה": 1,
+  "שני": 2, "שניה": 2, "שנייה": 2, "שתיים": 2, "שניים": 2,
+  "שלוש": 3, "שלושה": 3, "שלישי": 3, "שלישית": 3,
+  "ארבע": 4, "ארבעה": 4, "רביעי": 4, "רביעית": 4,
+  "חמש": 5, "חמישה": 5, "חמישי": 5, "חמישית": 5,
+  "שש": 6, "שישה": 6, "שישי": 6, "שישית": 6,
+  "שבע": 7, "שבעה": 7, "שביעי": 7, "שביעית": 7,
+  "שמונה": 8, "שמיני": 8, "שמינית": 8,
+  "תשע": 9, "תשעה": 9, "תשיעי": 9, "תשיעית": 9,
+  "עשר": 10, "עשרה": 10, "עשירי": 10, "עשירית": 10,
+};
+
+function matchesRegularSearch(row: SearchMovieRow, parsed: ParsedRegularSearch) {
+  const haystack = normalizeSearchText(`${row.title || ""} ${row.raw_caption || ""}`);
+  if (!parsed.keywords.every((word) => haystack.includes(word))) return false;
+  if (!parsed.seasonNumbers.every((n) => hasContextNumber(haystack, "season", n))) return false;
+  if (!parsed.episodeNumbers.every((n) => hasContextNumber(haystack, "episode", n))) return false;
+  return parsed.genericNumbers.every((n) => hasPlainNumber(haystack, n));
+}
+
+function regularSearchScore(row: SearchMovieRow, parsed: ParsedRegularSearch) {
+  const title = normalizeSearchText(row.title || "");
+  let score = 0;
+  for (const word of parsed.keywords) if (title.includes(word)) score += 20;
+  for (const n of parsed.seasonNumbers) if (hasContextNumber(title, "season", n)) score += 60;
+  for (const n of parsed.episodeNumbers) if (hasContextNumber(title, "episode", n)) score += 70;
+  score -= Math.min(title.length, 250) / 100;
+  return score;
+}
+
+function hasContextNumber(text: string, kind: "season" | "episode", n: number) {
+  const labels = kind === "season" ? ["עונה", "עונת", "season", "s"] : ["פרק", "episode", "ep", "e"];
+  return labels.some((label) => numericForms(n).some((form) => text.includes(`${label} ${form}`) || text.includes(`${label}${form}`)));
+}
+
+function hasPlainNumber(text: string, n: number) {
+  return numericForms(n).some((form) => new RegExp(`(^|\\D)${escapeRegex(form)}(\\D|$)`).test(text));
+}
+
+function tokenizeSearch(query: string) {
+  return normalizeSearchText(query).match(/[\p{L}\p{N}]+/gu) ?? [];
+}
+
+function normalizeSearchText(value: string) {
+  return value.toLowerCase().normalize("NFKC").replace(/[־‐‑–—_.:/\\()[\]{}+|]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function contextKind(token: string): "season" | "episode" | null {
+  if (["עונה", "עונת", "season", "seasons", "s"].includes(token)) return "season";
+  if (["פרק", "episode", "episodes", "ep", "e"].includes(token)) return "episode";
+  return null;
+}
+
+function parseCompactContext(token: string): { kind: "season" | "episode"; value: number } | null {
+  const match = token.match(/^(עונה|עונת|season|s|פרק|episode|ep|e)(\d{1,3})$/);
+  if (!match) return null;
+  const value = numberValue(match[2]);
+  if (value === null) return null;
+  return { kind: ["עונה", "עונת", "season", "s"].includes(match[1]) ? "season" : "episode", value };
+}
+
+function numberValue(token: string) {
+  if (/^\d{1,3}$/.test(token)) return Number(token);
+  return HEBREW_NUMBER_WORDS[token] ?? null;
+}
+
+function numericForms(n: number) {
+  const forms = [String(n)];
+  if (n >= 0 && n < 10) forms.push(String(n).padStart(2, "0"));
+  return unique(forms);
+}
+
+function escapePostgrestLike(value: string) {
+  return value.replace(/[%_,()]/g, "\\$&");
+}
+
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function unique<T>(items: T[]) {
+  return Array.from(new Set(items));
+}
+
+function uniqueNumbers(items: number[]) {
+  return unique(items.filter((n) => Number.isFinite(n) && n >= 0));
 }
 
 export async function getMovieById(id: number) {

@@ -317,6 +317,8 @@ async function runSearchAndRespond(
       cacheSearchPage(qid, page, PAGE_SIZE, rows, total).catch(() => {}),
     ]);
   }
+  rows = rows ?? [];
+  total = total ?? 0;
   if (total === 0) {
     const txt = `❌ לא נמצאו תוצאות עבור: <b>${escapeHtml(query)}</b>`;
     if (editMessageId) await editMessageText(chatId, editMessageId, txt).catch(() => {});

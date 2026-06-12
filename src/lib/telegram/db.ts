@@ -240,6 +240,96 @@ function parseRegularSearch(query: string): ParsedRegularSearch {
   };
 }
 
+const SEARCH_STOP_WORDS = new Set(["את", "של", "עם", "סדרה", "הסדרה", "סרט", "הסרט", "season", "episode"]);
+const HEBREW_NUMBER_WORDS: Record<string, number> = {
+  "אחד": 1, "אחת": 1, "ראשון": 1, "ראשונה": 1,
+  "שני": 2, "שניה": 2, "שנייה": 2, "שתיים": 2, "שניים": 2,
+  "שלוש": 3, "שלושה": 3, "שלישי": 3, "שלישית": 3,
+  "ארבע": 4, "ארבעה": 4, "רביעי": 4, "רביעית": 4,
+  "חמש": 5, "חמישה": 5, "חמישי": 5, "חמישית": 5,
+  "שש": 6, "שישה": 6, "שישי": 6, "שישית": 6,
+  "שבע": 7, "שבעה": 7, "שביעי": 7, "שביעית": 7,
+  "שמונה": 8, "שמיני": 8, "שמינית": 8,
+  "תשע": 9, "תשעה": 9, "תשיעי": 9, "תשיעית": 9,
+  "עשר": 10, "עשרה": 10, "עשירי": 10, "עשירית": 10,
+};
+
+function matchesRegularSearch(row: SearchMovieRow, parsed: ParsedRegularSearch) {
+  const haystack = normalizeSearchText(`${row.title || ""} ${row.raw_caption || ""}`);
+  if (!parsed.keywords.every((word) => haystack.includes(word))) return false;
+  if (!parsed.seasonNumbers.every((n) => hasContextNumber(haystack, "season", n))) return false;
+  if (!parsed.episodeNumbers.every((n) => hasContextNumber(haystack, "episode", n))) return false;
+  return parsed.genericNumbers.every((n) => hasPlainNumber(haystack, n));
+}
+
+function regularSearchScore(row: SearchMovieRow, parsed: ParsedRegularSearch) {
+  const title = normalizeSearchText(row.title || "");
+  let score = 0;
+  for (const word of parsed.keywords) if (title.includes(word)) score += 20;
+  for (const n of parsed.seasonNumbers) if (hasContextNumber(title, "season", n)) score += 60;
+  for (const n of parsed.episodeNumbers) if (hasContextNumber(title, "episode", n)) score += 70;
+  score -= Math.min(title.length, 250) / 100;
+  return score;
+}
+
+function hasContextNumber(text: string, kind: "season" | "episode", n: number) {
+  const labels = kind === "season" ? ["עונה", "עונת", "season", "s"] : ["פרק", "episode", "ep", "e"];
+  return labels.some((label) => numericForms(n).some((form) => text.includes(`${label} ${form}`) || text.includes(`${label}${form}`)));
+}
+
+function hasPlainNumber(text: string, n: number) {
+  return numericForms(n).some((form) => new RegExp(`(^|\\D)${escapeRegex(form)}(\\D|$)`).test(text));
+}
+
+function tokenizeSearch(query: string) {
+  return normalizeSearchText(query).match(/[\p{L}\p{N}]+/gu) ?? [];
+}
+
+function normalizeSearchText(value: string) {
+  return value.toLowerCase().normalize("NFKC").replace(/[־‐‑–—_.:/\\()[\]{}+|]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function contextKind(token: string): "season" | "episode" | null {
+  if (["עונה", "עונת", "season", "seasons", "s"].includes(token)) return "season";
+  if (["פרק", "episode", "episodes", "ep", "e"].includes(token)) return "episode";
+  return null;
+}
+
+function parseCompactContext(token: string): { kind: "season" | "episode"; value: number } | null {
+  const match = token.match(/^(עונה|עונת|season|s|פרק|episode|ep|e)(\d{1,3})$/);
+  if (!match) return null;
+  const value = numberValue(match[2]);
+  if (value === null) return null;
+  return { kind: ["עונה", "עונת", "season", "s"].includes(match[1]) ? "season" : "episode", value };
+}
+
+function numberValue(token: string) {
+  if (/^\d{1,3}$/.test(token)) return Number(token);
+  return HEBREW_NUMBER_WORDS[token] ?? null;
+}
+
+function numericForms(n: number) {
+  const forms = [String(n)];
+  if (n >= 0 && n < 10) forms.push(String(n).padStart(2, "0"));
+  return unique(forms);
+}
+
+function escapePostgrestLike(value: string) {
+  return value.replace(/[%_,()]/g, "\\$&");
+}
+
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function unique<T>(items: T[]) {
+  return Array.from(new Set(items));
+}
+
+function uniqueNumbers(items: number[]) {
+  return unique(items.filter((n) => Number.isFinite(n) && n >= 0));
+}
+
 export async function getMovieById(id: number) {
   const { data, error } = await admin().from("movies").select("*").eq("id", id).single();
   if (error) return null;

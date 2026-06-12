@@ -96,22 +96,18 @@ export async function searchMovies(query: string, page: number, pageSize: number
   if (!q) return { rows: [] as any[], total: 0 };
   const from = page * pageSize;
   const to = from + pageSize - 1;
-  // ILIKE search across title+caption. Build one combined OR filter so the
-  // PostgREST query stays a single .or() call (chained .or() replaces, not ANDs).
-  const words = q.split(/\s+/).filter(Boolean).slice(0, 4);
-  const ors: string[] = [];
+  // Each word must match (in title OR caption); words are AND-ed together
+  // so "עונה 6" requires both "עונה" and "6" to appear, not either one.
+  const words = q.split(/\s+/).filter(Boolean).slice(0, 6);
+  const includeCount = opts.includeCount !== false;
+  let req = admin()
+    .from("movies")
+    .select("id,title,message_id,source_channel_id", includeCount ? { count: "exact" } : {});
   for (const w of words) {
     const esc = w.replace(/[%_,()]/g, "\\$&");
-    ors.push(`title.ilike.%${esc}%`);
-    ors.push(`raw_caption.ilike.%${esc}%`);
+    req = req.or(`title.ilike.%${esc}%,raw_caption.ilike.%${esc}%`);
   }
-  const includeCount = opts.includeCount !== false;
-  const req = admin()
-    .from("movies")
-    .select("id,title,message_id,source_channel_id", includeCount ? { count: "exact" } : {})
-    .or(ors.join(","))
-    .order("id", { ascending: false })
-    .range(from, to);
+  req = req.order("id", { ascending: false }).range(from, to);
   const { data, error, count } = await req;
   if (error) throw error;
   return { rows: data ?? [], total: includeCount ? (count ?? 0) : (opts.knownTotal ?? 0) };

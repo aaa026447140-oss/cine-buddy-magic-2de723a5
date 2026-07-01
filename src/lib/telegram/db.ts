@@ -135,6 +135,7 @@ export async function searchMovies(
   const parsed = parseRegularSearch(q);
   const dedupe = opts.dedupe !== false;
   if (!parsed.hasNumberFilters) return searchWordsPaged(q, page, pageSize, dedupe);
+  if (parsed.keywords.length === 0) return { rows: [], total: 0, totalRaw: 0, hiddenDuplicates: 0 };
 
   const all = await fetchRegularSearchCandidates(q, parsed);
   const filtered = parsed.hasNumberFilters

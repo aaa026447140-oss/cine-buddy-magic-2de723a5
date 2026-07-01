@@ -200,7 +200,7 @@ async function fetchWordSearchRows(query: string, offset: number, limit: number,
 
 function buildWordSearchRequest(query: string, withCount: boolean): any {
   const words = query.split(/\s+/).filter(Boolean).slice(0, SEARCH_WORD_LIMIT);
-  let req: any = admin().from("movies").select(MOVIE_SEARCH_COLUMNS, withCount ? { count: "exact" } : undefined);
+  let req: any = admin().from("movies").select(MOVIE_SEARCH_COLUMNS, withCount ? { count: "planned" } : undefined);
   for (const w of words) req = req.or(ilikeAnyField(w));
   return req.order("id", { ascending: false });
 }

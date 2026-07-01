@@ -175,7 +175,7 @@ async function handleMessage(msg: any) {
       const text = msg.text.trim();
       if (text.startsWith("/")) return; // ignore commands in groups
       if (text.length < 2) return;
-      await runSearchAndRespond(chat.id, from.id, text, 0, null, true);
+      await safeRunSearchAndRespond(chat.id, from.id, text, 0, null, true);
     }
     return;
   }
@@ -235,7 +235,7 @@ async function handleMessage(msg: any) {
 
   // Free-text search in private
   if (text && !text.startsWith("/")) {
-    return await runSearchAndRespond(chat.id, Number(from.id), text, 0, null, false);
+    return await safeRunSearchAndRespond(chat.id, Number(from.id), text, 0, null, false);
   }
 }
 
@@ -359,6 +359,27 @@ async function runSearchAndRespond(
   }
 }
 
+async function safeRunSearchAndRespond(
+  chatId: number,
+  userId: number,
+  query: string,
+  page: number,
+  editMessageId: number | null,
+  inGroup: boolean,
+  queryIdOverride?: string,
+  latestScope?: string,
+  dedupe: boolean = true,
+) {
+  try {
+    await runSearchAndRespond(chatId, userId, query, page, editMessageId, inGroup, queryIdOverride, latestScope, dedupe);
+  } catch (e: any) {
+    console.error("search failed:", e?.message || e);
+    const text = "❌ הייתה תקלה בחיפוש. נסה שוב עם שם מדויק יותר.";
+    if (editMessageId) await editMessageText(chatId, editMessageId, text).catch(() => {});
+    else await sendMessage(chatId, text).catch(() => {});
+  }
+}
+
 async function serveMovie(chatId: number, userId: number, movieId: number) {
   const settings = await getSettings();
   const ok = await requireSubscriptionOrPrompt(chatId, userId, settings, `m_${movieId}`);
@@ -412,7 +433,7 @@ async function handleCallback(cq: any) {
     answerCallbackQuery(cq.id).catch(() => {});
     const newDedupe = flag === "1";
     const inGroup = msg.chat.type !== "private";
-    await runSearchAndRespond(chatId, from.id, cached.query, 0, msg.message_id, inGroup, undefined, `${chatId}:${msg.message_id}`, newDedupe);
+    await safeRunSearchAndRespond(chatId, from.id, cached.query, 0, msg.message_id, inGroup, undefined, `${chatId}:${msg.message_id}`, newDedupe);
     return;
   }
 
@@ -485,7 +506,7 @@ async function handleCallback(cq: any) {
     }
     if (page === pageFromMessageText(msg.text)) return;
     const inGroup = msg.chat.type !== "private";
-    await runSearchAndRespond(chatId, from.id, cached.query, page, msg.message_id, inGroup, qid, `${chatId}:${msg.message_id}`, cached.dedupe !== false);
+    await safeRunSearchAndRespond(chatId, from.id, cached.query, page, msg.message_id, inGroup, qid, `${chatId}:${msg.message_id}`, cached.dedupe !== false);
     return;
   }
 
@@ -499,7 +520,7 @@ async function handleCallback(cq: any) {
     }
     if (page === pageFromMessageText(msg.text)) return;
     const inGroup = msg.chat.type !== "private";
-    await runSearchAndRespond(chatId, from.id, cached.query, page, msg.message_id, inGroup, qid, `${chatId}:${msg.message_id}`, cached.dedupe !== false);
+    await safeRunSearchAndRespond(chatId, from.id, cached.query, page, msg.message_id, inGroup, qid, `${chatId}:${msg.message_id}`, cached.dedupe !== false);
     return;
   }
 
@@ -517,7 +538,7 @@ async function handleCallback(cq: any) {
       return;
     }
     const inGroup = msg.chat.type !== "private";
-    await runSearchAndRespond(chatId, from.id, cached.query, page, msg.message_id, inGroup, qid, latestScope, cached.dedupe !== false);
+    await safeRunSearchAndRespond(chatId, from.id, cached.query, page, msg.message_id, inGroup, qid, latestScope, cached.dedupe !== false);
     return;
   }
 

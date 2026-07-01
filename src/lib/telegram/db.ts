@@ -92,8 +92,13 @@ export async function indexMovie(m: {
 }
 
 const SEARCH_WORD_LIMIT = 6;
-const REGULAR_SEARCH_BATCH = 1000;
-const REGULAR_SEARCH_SCAN_LIMIT = 12000;
+const WORD_SEARCH_DEDUPE_OVERFETCH = 8;
+const WORD_SEARCH_MIN_WINDOW = 100;
+const WORD_SEARCH_MAX_WINDOW = 500;
+const REGULAR_SEARCH_BATCH = 500;
+const REGULAR_SEARCH_SCAN_LIMIT = 3000;
+const MOVIE_SEARCH_COLUMNS = "id,title,message_id,source_channel_id,raw_caption,file_unique_id,file_type,file_size";
+const MOVIE_RESULT_COLUMNS = "id,title,message_id,source_channel_id,file_unique_id,file_type,file_size";
 
 type SearchMovieRow = {
   id: number;
@@ -130,9 +135,11 @@ export async function searchMovies(
   const q = query.trim();
   if (!q) return { rows: [], total: 0, totalRaw: 0, hiddenDuplicates: 0 };
   const parsed = parseRegularSearch(q);
-  const all = parsed.hasNumberFilters
-    ? await fetchRegularSearchCandidates(q, parsed)
-    : await fetchWordSearchCandidates(q);
+  const dedupe = opts.dedupe !== false;
+  if (!parsed.hasNumberFilters) return searchWordsPaged(q, page, pageSize, dedupe);
+  if (parsed.keywords.length === 0) return { rows: [], total: 0, totalRaw: 0, hiddenDuplicates: 0 };
+
+  const all = await fetchRegularSearchCandidates(q, parsed);
   const filtered = parsed.hasNumberFilters
     ? all
         .filter((row) => matchesRegularSearch(row, parsed))
@@ -140,37 +147,69 @@ export async function searchMovies(
         .sort((a, b) => b.score - a.score || Number(b.row.id) - Number(a.row.id))
         .map(({ row }) => row)
     : all;
-  const totalRaw = filtered.length;
-  const dedupe = opts.dedupe !== false;
-  const finalRows = dedupe ? dedupeRows(filtered) : filtered;
+  return paginateSearchRows(filtered, page, pageSize, dedupe);
+}
+
+async function searchWordsPaged(query: string, page: number, pageSize: number, dedupe: boolean): Promise<SearchMoviesResult> {
+  if (!dedupe) {
+    const { rows, totalRaw } = await fetchWordSearchRows(query, page * pageSize, pageSize, true);
+    return formatSearchResult(rows, totalRaw, totalRaw, 0);
+  }
+
+  const wanted = (page + 1) * pageSize;
+  const windowSize = Math.min(Math.max(wanted * WORD_SEARCH_DEDUPE_OVERFETCH, WORD_SEARCH_MIN_WINDOW), WORD_SEARCH_MAX_WINDOW);
+  const { rows, totalRaw } = await fetchWordSearchRows(query, 0, windowSize, true);
+  const deduped = dedupeRows(rows);
+  const hiddenInWindow = rows.length - deduped.length;
+  const pageRows = deduped.slice(page * pageSize, page * pageSize + pageSize);
+  const estimatedTotal = Math.max(pageRows.length + page * pageSize, totalRaw - hiddenInWindow);
+  return formatSearchResult(pageRows, estimatedTotal, totalRaw, Math.max(0, totalRaw - estimatedTotal));
+}
+
+function paginateSearchRows(rows: SearchMovieRow[], page: number, pageSize: number, dedupe: boolean): SearchMoviesResult {
+  const totalRaw = rows.length;
+  const finalRows = dedupe ? dedupeRows(rows) : rows;
   const total = finalRows.length;
   const hiddenDuplicates = Math.max(0, totalRaw - total);
   const from = page * pageSize;
-  const rows = finalRows.slice(from, from + pageSize).map((r) => ({
+  return formatSearchResult(finalRows.slice(from, from + pageSize), total, totalRaw, hiddenDuplicates);
+}
+
+function formatSearchResult(rows: SearchMovieRow[], total: number, totalRaw: number, hiddenDuplicates: number): SearchMoviesResult {
+  return {
+    rows: rows.map((r) => ({
     id: r.id,
     title: r.title,
     message_id: r.message_id,
     source_channel_id: r.source_channel_id,
-  }));
-  return { rows, total, totalRaw, hiddenDuplicates };
+    })),
+    total,
+    totalRaw,
+    hiddenDuplicates,
+  };
 }
 
-async function fetchWordSearchCandidates(query: string): Promise<SearchMovieRow[]> {
+async function fetchWordSearchRows(query: string, offset: number, limit: number, withCount: boolean): Promise<{ rows: SearchMovieRow[]; totalRaw: number }> {
+  const to = Math.max(offset, offset + limit - 1);
+  const req = buildWordSearchRequest(query, withCount).range(offset, to);
+  const { data, error, count } = await req;
+  if (error && withCount) return fetchWordSearchRows(query, offset, limit, false);
+  if (error) throw error;
+  const rows = (data ?? []) as SearchMovieRow[];
+  const fallbackTotal = offset + rows.length + (rows.length === limit ? pageSizeFallback(limit) : 0);
+  return { rows, totalRaw: typeof count === "number" ? count : fallbackTotal };
+}
+
+function buildWordSearchRequest(query: string, withCount: boolean): any {
   const words = query.split(/\s+/).filter(Boolean).slice(0, SEARCH_WORD_LIMIT);
-  const candidates: SearchMovieRow[] = [];
-  for (let from = 0; from < REGULAR_SEARCH_SCAN_LIMIT; from += REGULAR_SEARCH_BATCH) {
-    const to = Math.min(from + REGULAR_SEARCH_BATCH - 1, REGULAR_SEARCH_SCAN_LIMIT - 1);
-    let req: any = admin()
-      .from("movies")
-      .select("id,title,message_id,source_channel_id,raw_caption,file_unique_id,file_type,file_size");
-    for (const w of words) req = req.or(ilikeAnyField(w));
-    const { data, error } = await req.order("id", { ascending: false }).range(from, to);
-    if (error) throw error;
-    const batch = (data ?? []) as SearchMovieRow[];
-    candidates.push(...batch);
-    if (batch.length < REGULAR_SEARCH_BATCH) break;
-  }
-  return candidates;
+  const countMode = words.length <= 1 ? "planned" : "exact";
+  let req: any = admin().from("movies").select(MOVIE_RESULT_COLUMNS, withCount ? { count: countMode } : undefined);
+  for (const w of words) req = req.or(ilikeAnyField(w));
+  return req.order("id", { ascending: false });
+}
+
+function pageSizeFallback(limit: number) {
+  return Math.min(limit, 100);
 }
 
 async function fetchRegularSearchCandidates(query: string, parsed: ParsedRegularSearch): Promise<SearchMovieRow[]> {
@@ -189,10 +228,10 @@ async function fetchRegularSearchCandidates(query: string, parsed: ParsedRegular
 function buildRegularSearchRequest(query: string, parsed: ParsedRegularSearch): any {
   let req: any = admin()
     .from("movies")
-    .select("id,title,message_id,source_channel_id,raw_caption,file_unique_id,file_type,file_size");
+    .select(MOVIE_SEARCH_COLUMNS);
   for (const word of parsed.keywords.slice(0, SEARCH_WORD_LIMIT)) req = req.or(ilikeAnyField(word));
+  const numericConditions = numericBaseConditions(parsed);
   if (parsed.keywords.length === 0) {
-    const numericConditions = numericBaseConditions(parsed);
     if (numericConditions.length > 0) req = req.or(numericConditions.join(","));
     else for (const w of query.split(/\s+/).filter(Boolean).slice(0, SEARCH_WORD_LIMIT)) req = req.or(ilikeAnyField(w));
   }

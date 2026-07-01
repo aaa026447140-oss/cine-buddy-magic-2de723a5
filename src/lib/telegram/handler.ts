@@ -300,25 +300,27 @@ async function runSearchAndRespond(
   inGroup: boolean,
   queryIdOverride?: string,
   latestScope?: string,
+  dedupe: boolean = true,
 ) {
-  let qid = queryIdOverride || shortId(`regular-search-v2:${query}`);
+  let qid = queryIdOverride || shortId(`search-v4:${dedupe ? "d1" : "d0"}:${query}`);
   let cachedPage = await getCachedSearchPage(qid, page, PAGE_SIZE).catch(() => null);
   let rows = cachedPage?.rows;
   let total = cachedPage?.total;
+  let hiddenDuplicates = (cachedPage as any)?.hiddenDuplicates as number | undefined;
 
   if (!rows || typeof total !== "number") {
-    const cachedSearch = queryIdOverride ? await getCachedSearch(qid).catch(() => null) : null;
-    const knownTotal = cachedSearch?.total;
-    const fresh = await searchMovies(query, page, PAGE_SIZE, { includeCount: knownTotal === undefined, knownTotal });
+    const fresh = await searchMovies(query, page, PAGE_SIZE, { dedupe });
     rows = fresh.rows;
     total = fresh.total;
+    hiddenDuplicates = fresh.hiddenDuplicates;
     await Promise.all([
       cacheQuery(qid, query, total).catch(() => {}),
-      cacheSearchPage(qid, page, PAGE_SIZE, rows ?? [], total ?? 0).catch(() => {}),
+      cacheSearchPageWithMeta(qid, page, PAGE_SIZE, rows ?? [], total ?? 0, hiddenDuplicates ?? 0).catch(() => {}),
     ]);
   }
   rows = rows ?? [];
   total = total ?? 0;
+  hiddenDuplicates = hiddenDuplicates ?? 0;
   if (total === 0) {
     const txt = `❌ לא נמצאו תוצאות עבור: <b>${escapeHtml(query)}</b>`;
     if (editMessageId) await editMessageText(chatId, editMessageId, txt).catch(() => {});
@@ -328,11 +330,20 @@ async function runSearchAndRespond(
   const totalPages = Math.ceil(total / PAGE_SIZE);
   const safePage = Math.max(0, Math.min(page, totalPages - 1));
   if (safePage !== page) {
-    return await runSearchAndRespond(chatId, userId, query, safePage, editMessageId, inGroup, qid, latestScope);
+    return await runSearchAndRespond(chatId, userId, query, safePage, editMessageId, inGroup, qid, latestScope, dedupe);
   }
-  const header = `🔎 תוצאות עבור: <b>${escapeHtml(query)}</b>\nנמצאו ${total.toLocaleString()} תוצאות${totalPages > 1 ? ` · עמוד ${page + 1}/${totalPages}` : ""}`;
+  const dedupeLine = dedupe
+    ? hiddenDuplicates > 0
+      ? `\n🧹 סינון כפילויות פעיל · הוסתרו ${hiddenDuplicates.toLocaleString()} כפילויות`
+      : `\n🧹 סינון כפילויות פעיל`
+    : `\n⚠️ מציג את כל התוצאות כולל כפילויות`;
+  const header = `🔎 תוצאות עבור: <b>${escapeHtml(query)}</b>\nנמצאו ${total.toLocaleString()} תוצאות${totalPages > 1 ? ` · עמוד ${page + 1}/${totalPages}` : ""}${dedupeLine}`;
   const botUsername = inGroup ? (await getMe()).username : "";
-  const kb = resultsKeyboard(rows as any, page, totalPages, qid, botUsername, inGroup);
+  const kb = resultsKeyboard(rows as any, page, totalPages, qid, botUsername, inGroup, {
+    dedupe,
+    hiddenDuplicates,
+    query,
+  });
   if (editMessageId) {
     const edited = await editMessageText(chatId, editMessageId, header, { reply_markup: kb })
       .then(() => true)

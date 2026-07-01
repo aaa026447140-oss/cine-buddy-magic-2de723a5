@@ -314,8 +314,8 @@ async function runSearchAndRespond(
     total = fresh.total;
     hiddenDuplicates = fresh.hiddenDuplicates;
     await Promise.all([
-      cacheQuery(qid, query, total).catch(() => {}),
-      cacheSearchPageWithMeta(qid, page, PAGE_SIZE, rows ?? [], total ?? 0, hiddenDuplicates ?? 0).catch(() => {}),
+      cacheQuery(qid, query, total, dedupe).catch(() => {}),
+      cacheSearchPage(qid, page, PAGE_SIZE, rows ?? [], total ?? 0, hiddenDuplicates ?? 0).catch(() => {}),
     ]);
   }
   rows = rows ?? [];

@@ -101,6 +101,9 @@ type SearchMovieRow = {
   message_id: number;
   source_channel_id: number;
   raw_caption?: string | null;
+  file_unique_id?: string | null;
+  file_type?: string | null;
+  file_size?: number | null;
 };
 
 type ParsedRegularSearch = {
@@ -111,29 +114,66 @@ type ParsedRegularSearch = {
   hasNumberFilters: boolean;
 };
 
-export async function searchMovies(query: string, page: number, pageSize: number, opts: { includeCount?: boolean; knownTotal?: number } = {}) {
+export type SearchMoviesResult = {
+  rows: any[];
+  total: number;
+  totalRaw: number;
+  hiddenDuplicates: number;
+};
+
+export async function searchMovies(
+  query: string,
+  page: number,
+  pageSize: number,
+  opts: { dedupe?: boolean } = {},
+): Promise<SearchMoviesResult> {
   const q = query.trim();
-  if (!q) return { rows: [] as any[], total: 0 };
+  if (!q) return { rows: [], total: 0, totalRaw: 0, hiddenDuplicates: 0 };
   const parsed = parseRegularSearch(q);
-  if (parsed.hasNumberFilters) return searchMoviesRegular(q, parsed, page, pageSize);
-  return searchMoviesByWords(q, page, pageSize, opts);
-}
-
-async function searchMoviesByWords(query: string, page: number, pageSize: number, opts: { includeCount?: boolean; knownTotal?: number }) {
+  const all = parsed.hasNumberFilters
+    ? await fetchRegularSearchCandidates(q, parsed)
+    : await fetchWordSearchCandidates(q);
+  const filtered = parsed.hasNumberFilters
+    ? all
+        .filter((row) => matchesRegularSearch(row, parsed))
+        .map((row) => ({ row, score: regularSearchScore(row, parsed) }))
+        .sort((a, b) => b.score - a.score || Number(b.row.id) - Number(a.row.id))
+        .map(({ row }) => row)
+    : all;
+  const totalRaw = filtered.length;
+  const dedupe = opts.dedupe !== false;
+  const finalRows = dedupe ? dedupeRows(filtered) : filtered;
+  const total = finalRows.length;
+  const hiddenDuplicates = Math.max(0, totalRaw - total);
   const from = page * pageSize;
-  const to = from + pageSize - 1;
-  const words = query.split(/\s+/).filter(Boolean).slice(0, SEARCH_WORD_LIMIT);
-  const includeCount = opts.includeCount !== false;
-  let req: any = admin()
-    .from("movies")
-    .select("id,title,message_id,source_channel_id", includeCount ? { count: "exact" } : {});
-  for (const w of words) req = req.or(ilikeAnyField(w));
-  const { data, error, count } = await req.order("id", { ascending: false }).range(from, to);
-  if (error) throw error;
-  return { rows: data ?? [], total: includeCount ? (count ?? 0) : (opts.knownTotal ?? 0) };
+  const rows = finalRows.slice(from, from + pageSize).map((r) => ({
+    id: r.id,
+    title: r.title,
+    message_id: r.message_id,
+    source_channel_id: r.source_channel_id,
+  }));
+  return { rows, total, totalRaw, hiddenDuplicates };
 }
 
-async function searchMoviesRegular(query: string, parsed: ParsedRegularSearch, page: number, pageSize: number) {
+async function fetchWordSearchCandidates(query: string): Promise<SearchMovieRow[]> {
+  const words = query.split(/\s+/).filter(Boolean).slice(0, SEARCH_WORD_LIMIT);
+  const candidates: SearchMovieRow[] = [];
+  for (let from = 0; from < REGULAR_SEARCH_SCAN_LIMIT; from += REGULAR_SEARCH_BATCH) {
+    const to = Math.min(from + REGULAR_SEARCH_BATCH - 1, REGULAR_SEARCH_SCAN_LIMIT - 1);
+    let req: any = admin()
+      .from("movies")
+      .select("id,title,message_id,source_channel_id,raw_caption,file_unique_id,file_type,file_size");
+    for (const w of words) req = req.or(ilikeAnyField(w));
+    const { data, error } = await req.order("id", { ascending: false }).range(from, to);
+    if (error) throw error;
+    const batch = (data ?? []) as SearchMovieRow[];
+    candidates.push(...batch);
+    if (batch.length < REGULAR_SEARCH_BATCH) break;
+  }
+  return candidates;
+}
+
+async function fetchRegularSearchCandidates(query: string, parsed: ParsedRegularSearch): Promise<SearchMovieRow[]> {
   const candidates: SearchMovieRow[] = [];
   for (let from = 0; from < REGULAR_SEARCH_SCAN_LIMIT; from += REGULAR_SEARCH_BATCH) {
     const to = Math.min(from + REGULAR_SEARCH_BATCH - 1, REGULAR_SEARCH_SCAN_LIMIT - 1);
@@ -143,17 +183,13 @@ async function searchMoviesRegular(query: string, parsed: ParsedRegularSearch, p
     candidates.push(...batch);
     if (batch.length < REGULAR_SEARCH_BATCH) break;
   }
-  const filtered = candidates
-    .filter((row) => matchesRegularSearch(row, parsed))
-    .map((row) => ({ row, score: regularSearchScore(row, parsed) }))
-    .sort((a, b) => b.score - a.score || Number(b.row.id) - Number(a.row.id))
-    .map(({ row }) => ({ id: row.id, title: row.title, message_id: row.message_id, source_channel_id: row.source_channel_id }));
-  const from = page * pageSize;
-  return { rows: filtered.slice(from, from + pageSize), total: filtered.length };
+  return candidates;
 }
 
 function buildRegularSearchRequest(query: string, parsed: ParsedRegularSearch): any {
-  let req: any = admin().from("movies").select("id,title,message_id,source_channel_id,raw_caption");
+  let req: any = admin()
+    .from("movies")
+    .select("id,title,message_id,source_channel_id,raw_caption,file_unique_id,file_type,file_size");
   for (const word of parsed.keywords.slice(0, SEARCH_WORD_LIMIT)) req = req.or(ilikeAnyField(word));
   if (parsed.keywords.length === 0) {
     const numericConditions = numericBaseConditions(parsed);
@@ -161,6 +197,24 @@ function buildRegularSearchRequest(query: string, parsed: ParsedRegularSearch): 
     else for (const w of query.split(/\s+/).filter(Boolean).slice(0, SEARCH_WORD_LIMIT)) req = req.or(ilikeAnyField(w));
   }
   return req.order("id", { ascending: false });
+}
+
+function dedupeRows(rows: SearchMovieRow[]): SearchMovieRow[] {
+  const seen = new Set<string>();
+  const out: SearchMovieRow[] = [];
+  for (const row of rows) {
+    const key = dedupeKey(row);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(row);
+  }
+  return out;
+}
+
+function dedupeKey(row: SearchMovieRow): string {
+  if (row.file_unique_id) return `u:${row.file_unique_id}`;
+  const title = normalizeSearchText(row.title || "");
+  return `k:${title}|${row.file_type ?? ""}|${row.file_size ?? ""}`;
 }
 
 function ilikeAnyField(value: string) {

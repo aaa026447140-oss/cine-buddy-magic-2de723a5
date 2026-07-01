@@ -40,6 +40,7 @@ export function resultsKeyboard(
   queryId: string,
   botUsername: string,
   inGroup: boolean,
+  dedupe: { dedupe: boolean; hiddenDuplicates: number; query: string } = { dedupe: true, hiddenDuplicates: 0, query: "" },
 ) {
   const rows: any[][] = [];
   for (const r of results) {
@@ -57,6 +58,14 @@ export function resultsKeyboard(
     nav.push({ text: `${page + 1}/${totalPages}`, callback_data: "noop" });
     if (page < totalPages - 1) nav.push({ text: "הבא ➡️", callback_data: pageCallback(queryId, page + 1) });
     rows.push(nav);
+  }
+  // Duplicate filter toggle
+  if (dedupe.dedupe) {
+    if (dedupe.hiddenDuplicates > 0) {
+      rows.push([{ text: `🔁 הצג כפילויות (+${dedupe.hiddenDuplicates})`, callback_data: `dup:${queryId}:0` }]);
+    }
+  } else {
+    rows.push([{ text: `🧹 הפעל סינון כפילויות`, callback_data: `dup:${queryId}:1` }]);
   }
   rows.push([
     { text: "🤖 הזמנת בוט פרטי", url: INVITE_PRIVATE_BOT_URL },

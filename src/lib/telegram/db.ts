@@ -523,6 +523,7 @@ export async function cacheSearchPage(id: string, page: number, pageSize: number
     { onConflict: "id" },
   );
 }
+const PAGE_CACHE_TTL_MS = 60_000; // 60s so counts refresh as new items arrive
 export async function getCachedSearchPage(id: string, page: number, pageSize: number): Promise<CachedSearchPage | null> {
   const { data } = await admin().from("query_cache").select("query").eq("id", pageCacheId(id, page, pageSize)).maybeSingle();
   const value = (data as any)?.query;
@@ -530,6 +531,8 @@ export async function getCachedSearchPage(id: string, page: number, pageSize: nu
   try {
     const parsed = JSON.parse(value);
     if (parsed?.kind === "page" && Array.isArray(parsed.rows) && typeof parsed.total === "number") {
+      const cachedAt = typeof parsed.cached_at === "number" ? parsed.cached_at : 0;
+      if (Date.now() - cachedAt > PAGE_CACHE_TTL_MS) return null;
       return { rows: parsed.rows, total: parsed.total };
     }
   } catch {

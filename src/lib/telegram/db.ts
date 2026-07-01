@@ -164,7 +164,7 @@ async function searchWordsPaged(query: string, page: number, pageSize: number, d
 }
 
 function paginateSearchRows(rows: SearchMovieRow[], page: number, pageSize: number, dedupe: boolean): SearchMoviesResult {
-  const totalRaw = filtered.length;
+  const totalRaw = rows.length;
   const finalRows = dedupe ? dedupeRows(rows) : rows;
   const total = finalRows.length;
   const hiddenDuplicates = Math.max(0, totalRaw - total);
@@ -227,7 +227,6 @@ function buildRegularSearchRequest(query: string, parsed: ParsedRegularSearch): 
     .select(MOVIE_SEARCH_COLUMNS);
   for (const word of parsed.keywords.slice(0, SEARCH_WORD_LIMIT)) req = req.or(ilikeAnyField(word));
   const numericConditions = numericBaseConditions(parsed);
-  if (numericConditions.length > 0) req = req.or(numericConditions.join(","));
   if (parsed.keywords.length === 0) {
     if (numericConditions.length > 0) req = req.or(numericConditions.join(","));
     else for (const w of query.split(/\s+/).filter(Boolean).slice(0, SEARCH_WORD_LIMIT)) req = req.or(ilikeAnyField(w));

@@ -175,7 +175,7 @@ async function handleMessage(msg: any) {
       const text = msg.text.trim();
       if (text.startsWith("/")) return; // ignore commands in groups
       if (text.length < 2) return;
-      await runSearchAndRespond(chat.id, from.id, text, 0, null, true);
+      await safeRunSearchAndRespond(chat.id, from.id, text, 0, null, true);
     }
     return;
   }
@@ -235,7 +235,7 @@ async function handleMessage(msg: any) {
 
   // Free-text search in private
   if (text && !text.startsWith("/")) {
-    return await runSearchAndRespond(chat.id, Number(from.id), text, 0, null, false);
+    return await safeRunSearchAndRespond(chat.id, Number(from.id), text, 0, null, false);
   }
 }
 
@@ -356,6 +356,27 @@ async function runSearchAndRespond(
   } else {
     const sent: any = await sendMessage(chatId, header, { reply_markup: kb });
     if (sent?.message_id) await setPageState(`${chatId}:${sent.message_id}`, qid, page).catch(() => {});
+  }
+}
+
+async function safeRunSearchAndRespond(
+  chatId: number,
+  userId: number,
+  query: string,
+  page: number,
+  editMessageId: number | null,
+  inGroup: boolean,
+  queryIdOverride?: string,
+  latestScope?: string,
+  dedupe: boolean = true,
+) {
+  try {
+    await runSearchAndRespond(chatId, userId, query, page, editMessageId, inGroup, queryIdOverride, latestScope, dedupe);
+  } catch (e: any) {
+    console.error("search failed:", e?.message || e);
+    const text = "❌ הייתה תקלה בחיפוש. נסה שוב עם שם מדויק יותר.";
+    if (editMessageId) await editMessageText(chatId, editMessageId, text).catch(() => {});
+    else await sendMessage(chatId, text).catch(() => {});
   }
 }
 

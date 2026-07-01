@@ -487,8 +487,8 @@ export async function isSourceChannel(chat_id: number): Promise<boolean> {
 }
 
 // ───── Query cache (pagination) ─────
-export type CachedSearch = { query: string; total?: number };
-export type CachedSearchPage = { rows: any[]; total: number };
+export type CachedSearch = { query: string; total?: number; dedupe?: boolean };
+export type CachedSearchPage = { rows: any[]; total: number; hiddenDuplicates?: number };
 export type CachedPageState = {
   queryId: string;
   page: number;
@@ -496,8 +496,8 @@ export type CachedPageState = {
   requestedAt: number;
 };
 
-export async function cacheQuery(id: string, query: string, total?: number) {
-  const value = JSON.stringify({ kind: "search", query, total, cached_at: Date.now() });
+export async function cacheQuery(id: string, query: string, total?: number, dedupe?: boolean) {
+  const value = JSON.stringify({ kind: "search", query, total, dedupe, cached_at: Date.now() });
   await admin().from("query_cache").upsert({ id, query: value, created_at: new Date().toISOString() }, { onConflict: "id" });
 }
 export async function getCachedQuery(id: string): Promise<string | null> {
@@ -510,14 +510,14 @@ export async function getCachedSearch(id: string): Promise<CachedSearch | null> 
   if (!value) return null;
   try {
     const parsed = JSON.parse(value);
-    if (parsed?.kind === "search" && typeof parsed.query === "string") return { query: parsed.query, total: parsed.total };
+    if (parsed?.kind === "search" && typeof parsed.query === "string") return { query: parsed.query, total: parsed.total, dedupe: parsed.dedupe };
   } catch {
     // Backward compatibility with old rows that stored only the raw query text.
   }
   return { query: value };
 }
-export async function cacheSearchPage(id: string, page: number, pageSize: number, rows: any[], total: number) {
-  const value = JSON.stringify({ kind: "page", rows, total, cached_at: Date.now() });
+export async function cacheSearchPage(id: string, page: number, pageSize: number, rows: any[], total: number, hiddenDuplicates: number = 0) {
+  const value = JSON.stringify({ kind: "page", rows, total, hiddenDuplicates, cached_at: Date.now() });
   await admin().from("query_cache").upsert(
     { id: pageCacheId(id, page, pageSize), query: value, created_at: new Date().toISOString() },
     { onConflict: "id" },
@@ -533,7 +533,7 @@ export async function getCachedSearchPage(id: string, page: number, pageSize: nu
     if (parsed?.kind === "page" && Array.isArray(parsed.rows) && typeof parsed.total === "number") {
       const cachedAt = typeof parsed.cached_at === "number" ? parsed.cached_at : 0;
       if (Date.now() - cachedAt > PAGE_CACHE_TTL_MS) return null;
-      return { rows: parsed.rows, total: parsed.total };
+      return { rows: parsed.rows, total: parsed.total, hiddenDuplicates: typeof parsed.hiddenDuplicates === "number" ? parsed.hiddenDuplicates : 0 };
     }
   } catch {
     return null;

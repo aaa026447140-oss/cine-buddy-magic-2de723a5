@@ -93,10 +93,12 @@ export async function indexMovie(m: {
 
 const SEARCH_WORD_LIMIT = 6;
 const WORD_SEARCH_DEDUPE_OVERFETCH = 8;
+const WORD_SEARCH_MIN_WINDOW = 1000;
 const WORD_SEARCH_MAX_WINDOW = 2000;
 const REGULAR_SEARCH_BATCH = 500;
 const REGULAR_SEARCH_SCAN_LIMIT = 3000;
 const MOVIE_SEARCH_COLUMNS = "id,title,message_id,source_channel_id,raw_caption,file_unique_id,file_type,file_size";
+const MOVIE_RESULT_COLUMNS = "id,title,message_id,source_channel_id,file_unique_id,file_type,file_size";
 
 type SearchMovieRow = {
   id: number;
@@ -155,7 +157,7 @@ async function searchWordsPaged(query: string, page: number, pageSize: number, d
   }
 
   const wanted = (page + 1) * pageSize;
-  const windowSize = Math.min(Math.max(wanted * WORD_SEARCH_DEDUPE_OVERFETCH, pageSize * 6), WORD_SEARCH_MAX_WINDOW);
+  const windowSize = Math.min(Math.max(wanted * WORD_SEARCH_DEDUPE_OVERFETCH, WORD_SEARCH_MIN_WINDOW), WORD_SEARCH_MAX_WINDOW);
   const { rows, totalRaw } = await fetchWordSearchRows(query, 0, windowSize, true);
   const deduped = dedupeRows(rows);
   const hiddenInWindow = rows.length - deduped.length;
@@ -200,7 +202,7 @@ async function fetchWordSearchRows(query: string, offset: number, limit: number,
 
 function buildWordSearchRequest(query: string, withCount: boolean): any {
   const words = query.split(/\s+/).filter(Boolean).slice(0, SEARCH_WORD_LIMIT);
-  let req: any = admin().from("movies").select(MOVIE_SEARCH_COLUMNS, withCount ? { count: "exact" } : undefined);
+  let req: any = admin().from("movies").select(MOVIE_RESULT_COLUMNS, withCount ? { count: "exact" } : undefined);
   for (const w of words) req = req.or(ilikeAnyField(w));
   return req.order("id", { ascending: false });
 }

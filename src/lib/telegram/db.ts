@@ -21,6 +21,8 @@ export interface BotSettings {
   updates_channel_url: string | null;
   support_chat_url: string | null;
   builder_username: string | null;
+  search_group_url: string | null;
+  search_group_title: string | null;
 }
 
 export async function getSettings(): Promise<BotSettings> {

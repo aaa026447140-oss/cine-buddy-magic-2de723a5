@@ -6,6 +6,9 @@ export function startMenuKeyboard(s: BotSettings, botUsername: string) {
   rows.push([
     { text: "📊 כמה סרטים יש במאגר?", callback_data: "show_stats" },
   ]);
+  if (s.search_group_url) {
+    rows.push([{ text: `🔎 ${s.search_group_title || "קבוצת החיפוש"}`, url: s.search_group_url }]);
+  }
   if (s.updates_channel_url || s.required_channel_invite_link) {
     rows.push([{ text: "📢 ערוץ עדכונים", url: s.updates_channel_url || s.required_channel_invite_link || "" }]);
   }
@@ -90,6 +93,7 @@ export function adminPanelKeyboard(isMain: boolean) {
   if (isMain) {
     rows.push([{ text: "🔒 הגדרת ערוץ חובה", callback_data: "admin_set_required" }]);
   }
+  rows.push([{ text: "🔎 הגדרת קבוצת חיפוש", callback_data: "admin_set_search_group" }]);
   rows.push([{ text: "📊 סטטיסטיקות", callback_data: "admin_stats" }]);
   rows.push([{ text: "📣 שידור לפרטיים", callback_data: "admin_bc_private" }]);
   rows.push([{ text: "📣 שידור לקבוצות", callback_data: "admin_bc_groups" }]);

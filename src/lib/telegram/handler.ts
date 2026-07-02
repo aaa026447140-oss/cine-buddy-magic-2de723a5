@@ -5,6 +5,7 @@ import {
   editMessageText,
   getChat,
   getChatMember,
+  getChatMemberCount,
   pinChatMessage,
   sendInvoice,
   sendMessage,
@@ -26,6 +27,7 @@ import {
   isUserAdmin,
   listAdmins,
   listGroups,
+  listGroupsDetailed,
   listSourceChannels,
   listUsers,
   markGroupInactive,
@@ -572,14 +574,49 @@ async function handleAdminCallback(cq: any, data: string) {
     case "admin_close":
       return await tg("deleteMessage", { chat_id: chatId, message_id: messageId }).catch(() => {});
     case "admin_stats": {
-      const s = await stats();
+      // Show a loading state first — fetching per-group member counts can take a moment.
+      await editMessageText(chatId, messageId, "📊 טוען סטטיסטיקות מפורטות...", {
+        reply_markup: { inline_keyboard: [[{ text: "« חזרה", callback_data: "admin_open" }]] },
+      }).catch(() => {});
+      const [s, groupList] = await Promise.all([stats(), listGroupsDetailed()]);
+      // Fetch member counts in parallel, tolerate individual failures.
+      const counts = await Promise.all(
+        groupList.map(async (g) => {
+          try {
+            const n = await getChatMemberCount(g.chat_id);
+            return { ...g, count: Number(n) || 0, ok: true };
+          } catch {
+            return { ...g, count: 0, ok: false };
+          }
+        }),
+      );
+      const totalGroupMembers = counts.reduce((sum, g) => sum + g.count, 0);
+      const combinedReach = totalGroupMembers + s.users;
+      const groupLines = counts.length
+        ? counts
+            .sort((a, b) => b.count - a.count)
+            .slice(0, 60)
+            .map((g) => {
+              const name = escapeHtml(g.title || String(g.chat_id));
+              return g.ok
+                ? `• <b>${name}</b> — ${g.count.toLocaleString()} משתמשים`
+                : `• <b>${name}</b> — <i>לא זמין</i>`;
+            })
+            .join("\n")
+        : "<i>אין קבוצות פעילות.</i>";
+      const moreNote = counts.length > 60 ? `\n<i>...ועוד ${counts.length - 60} קבוצות</i>` : "";
       const text =
-        `📊 <b>סטטיסטיקות</b>\n\n` +
+        `📊 <b>סטטיסטיקות מפורטות</b>\n\n` +
         `🎬 סרטים: <b>${s.movies.toLocaleString()}</b>\n` +
-        `👤 משתמשים פעילים: <b>${s.users.toLocaleString()}</b>\n` +
+        `👤 משתמשים בפרטי: <b>${s.users.toLocaleString()}</b>\n` +
         `👥 קבוצות פעילות: <b>${s.groups.toLocaleString()}</b>\n` +
-        `⭐ סה״כ כוכבים שתרמו: <b>${s.totalStars.toLocaleString()}</b>`;
-      return await editMessageText(chatId, messageId, text, {
+        `👨‍👩‍👧 סה״כ משתמשים בקבוצות: <b>${totalGroupMembers.toLocaleString()}</b>\n` +
+        `🌐 סה״כ קהל (פרטי + קבוצות): <b>${combinedReach.toLocaleString()}</b>\n` +
+        `⭐ סה״כ כוכבים שתרמו: <b>${s.totalStars.toLocaleString()}</b>\n\n` +
+        `<b>רשימת קבוצות:</b>\n${groupLines}${moreNote}`;
+      // Telegram message hard limit is 4096 chars; trim from the middle if needed.
+      const safe = text.length > 3900 ? text.slice(0, 3900) + "\n<i>...נחתך</i>" : text;
+      return await editMessageText(chatId, messageId, safe, {
         reply_markup: { inline_keyboard: [[{ text: "« חזרה", callback_data: "admin_open" }]] },
       }).catch(() => {});
     }
@@ -611,6 +648,15 @@ async function handleAdminCallback(cq: any, data: string) {
         "🔒 שלח לי את <b>שם המשתמש</b> או <b>ה-ID</b> של ערוץ החובה.\n\n" +
           "דוגמה: <code>@my_channel</code>.\n" +
           "ודא שהבוט הוסף לערוץ <b>כאדמין</b>.\n\n" +
+          "שלח /cancel לביטול.",
+      );
+    case "admin_set_search_group":
+      await setAdminState(userId, "awaiting_search_group");
+      return await sendMessage(
+        chatId,
+        "🔎 שלח לי את <b>הקישור לקבוצת החיפוש</b> (למשל <code>https://t.me/mygroup</code> או <code>@mygroup</code>).\n\n" +
+          "אפשר גם לשלוח בשורה שנייה שם תצוגה מותאם (למשל <code>קבוצת החיפוש שלנו</code>).\n" +
+          "כדי להסיר את הכפתור — שלח <code>מחק</code>.\n\n" +
           "שלח /cancel לביטול.",
       );
     case "admin_bc_private":
@@ -745,6 +791,32 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
     } catch (e: any) {
       await sendMessage(chatId, `❌ לא הצלחתי לאמת את הערוץ.\n${escapeHtml(e?.description || e?.message || "")}`);
     }
+    return;
+  }
+
+  if (st.state === "awaiting_search_group") {
+    await setAdminState(userId, null);
+    if (/^מחק$/i.test(text) || /^remove$/i.test(text) || /^clear$/i.test(text)) {
+      await updateSettings({ search_group_url: null, search_group_title: null });
+      await sendMessage(chatId, "✅ כפתור קבוצת החיפוש הוסר.");
+      return;
+    }
+    const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+    const raw = lines[0] || "";
+    const customTitle = lines.slice(1).join(" ").trim() || null;
+    let url = raw;
+    if (raw.startsWith("@")) url = `https://t.me/${raw.slice(1)}`;
+    else if (/^[A-Za-z0-9_]{5,}$/.test(raw)) url = `https://t.me/${raw}`;
+    if (!/^https?:\/\//i.test(url)) {
+      await sendMessage(chatId, "❌ קישור לא חוקי. שלח קישור מלא (https://t.me/...) או @username. שלח /cancel לביטול.");
+      await setAdminState(userId, "awaiting_search_group");
+      return;
+    }
+    await updateSettings({ search_group_url: url, search_group_title: customTitle });
+    await sendMessage(
+      chatId,
+      `✅ נקבעה קבוצת חיפוש: <b>${escapeHtml(customTitle || url)}</b>\n\nעכשיו יופיע כפתור בתפריט הראשי לכל המשתמשים.`,
+    );
     return;
   }
 

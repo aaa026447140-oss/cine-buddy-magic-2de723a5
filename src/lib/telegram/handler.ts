@@ -795,6 +795,36 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
   }
 
   if (st.state === "awaiting_broadcast") {
+    // fall through below
+  }
+
+  if (st.state === "awaiting_search_group") {
+    await setAdminState(userId, null);
+    if (/^מחק$/i.test(text) || /^remove$/i.test(text) || /^clear$/i.test(text)) {
+      await updateSettings({ search_group_url: null, search_group_title: null });
+      await sendMessage(chatId, "✅ כפתור קבוצת החיפוש הוסר.");
+      return;
+    }
+    const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+    const raw = lines[0] || "";
+    const customTitle = lines.slice(1).join(" ").trim() || null;
+    let url = raw;
+    if (raw.startsWith("@")) url = `https://t.me/${raw.slice(1)}`;
+    else if (/^[A-Za-z0-9_]{5,}$/.test(raw)) url = `https://t.me/${raw}`;
+    if (!/^https?:\/\//i.test(url)) {
+      await sendMessage(chatId, "❌ קישור לא חוקי. שלח קישור מלא (https://t.me/...) או @username. שלח /cancel לביטול.");
+      await setAdminState(userId, "awaiting_search_group");
+      return;
+    }
+    await updateSettings({ search_group_url: url, search_group_title: customTitle });
+    await sendMessage(
+      chatId,
+      `✅ נקבעה קבוצת חיפוש: <b>${escapeHtml(customTitle || url)}</b>\n\nעכשיו יופיע כפתור בתפריט הראשי לכל המשתמשים.`,
+    );
+    return;
+  }
+
+  if (st.state === "awaiting_broadcast") {
     const target = st.data?.target as "private" | "groups" | "all";
     await setAdminState(userId, null);
     await sendMessage(chatId, "🚀 מתחיל שידור — זה עשוי לקחת זמן, אל תסגור את הצ׳אט...");

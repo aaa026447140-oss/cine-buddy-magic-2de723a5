@@ -650,6 +650,15 @@ async function handleAdminCallback(cq: any, data: string) {
           "ודא שהבוט הוסף לערוץ <b>כאדמין</b>.\n\n" +
           "שלח /cancel לביטול.",
       );
+    case "admin_set_search_group":
+      await setAdminState(userId, "awaiting_search_group");
+      return await sendMessage(
+        chatId,
+        "🔎 שלח לי את <b>הקישור לקבוצת החיפוש</b> (למשל <code>https://t.me/mygroup</code> או <code>@mygroup</code>).\n\n" +
+          "אפשר גם לשלוח בשורה שנייה שם תצוגה מותאם (למשל <code>קבוצת החיפוש שלנו</code>).\n" +
+          "כדי להסיר את הכפתור — שלח <code>מחק</code>.\n\n" +
+          "שלח /cancel לביטול.",
+      );
     case "admin_bc_private":
       await setAdminState(userId, "awaiting_broadcast", { target: "private" });
       return await sendMessage(chatId, "✏️ שלח את ההודעה לשידור <b>לכל המשתמשים בפרטי</b>.\nשלח /cancel לביטול.");

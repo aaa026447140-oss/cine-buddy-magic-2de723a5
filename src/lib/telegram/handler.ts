@@ -794,10 +794,6 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
     return;
   }
 
-  if (st.state === "awaiting_broadcast") {
-    // fall through below
-  }
-
   if (st.state === "awaiting_search_group") {
     await setAdminState(userId, null);
     if (/^מחק$/i.test(text) || /^remove$/i.test(text) || /^clear$/i.test(text)) {

@@ -94,6 +94,8 @@ export type Database = {
           required_channel_invite_link: string | null
           required_channel_title: string | null
           required_channel_username: string | null
+          search_group_title: string | null
+          search_group_url: string | null
           source_channel_id: number | null
           source_channel_title: string | null
           source_channel_username: string | null
@@ -108,6 +110,8 @@ export type Database = {
           required_channel_invite_link?: string | null
           required_channel_title?: string | null
           required_channel_username?: string | null
+          search_group_title?: string | null
+          search_group_url?: string | null
           source_channel_id?: number | null
           source_channel_title?: string | null
           source_channel_username?: string | null
@@ -122,6 +126,8 @@ export type Database = {
           required_channel_invite_link?: string | null
           required_channel_title?: string | null
           required_channel_username?: string | null
+          search_group_title?: string | null
+          search_group_url?: string | null
           source_channel_id?: number | null
           source_channel_title?: string | null
           source_channel_username?: string | null

@@ -598,6 +598,28 @@ export async function cacheSearchPage(id: string, page: number, pageSize: number
   );
 }
 const PAGE_CACHE_TTL_MS = 60_000; // 60s so counts refresh as new items arrive
+const SEARCH_ALL_TTL_MS = 5 * 60_000; // 5 min: fresh enough, avoids re-search on every click
+export async function cacheSearchAll(id: string, query: string, rows: SearchMovieRow[]) {
+  const value = JSON.stringify({ kind: "search_all", query, rows, cached_at: Date.now() });
+  await admin().from("query_cache").upsert(
+    { id: allCacheId(id), query: value, created_at: new Date().toISOString() },
+    { onConflict: "id" },
+  );
+}
+export async function getCachedSearchAll(id: string): Promise<{ query: string; rows: SearchMovieRow[] } | null> {
+  const { data } = await admin().from("query_cache").select("query").eq("id", allCacheId(id)).maybeSingle();
+  const value = (data as any)?.query;
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed?.kind !== "search_all" || !Array.isArray(parsed.rows)) return null;
+    const cachedAt = typeof parsed.cached_at === "number" ? parsed.cached_at : 0;
+    if (Date.now() - cachedAt > SEARCH_ALL_TTL_MS) return null;
+    return { query: String(parsed.query || ""), rows: parsed.rows as SearchMovieRow[] };
+  } catch {
+    return null;
+  }
+}
 export async function getCachedSearchPage(id: string, page: number, pageSize: number): Promise<CachedSearchPage | null> {
   const { data } = await admin().from("query_cache").select("query").eq("id", pageCacheId(id, page, pageSize)).maybeSingle();
   const value = (data as any)?.query;
@@ -665,4 +687,7 @@ function pageStateId(scope: string) {
 }
 function pageRequestId(scope: string) {
   return `nav:${scope}`;
+}
+function allCacheId(id: string) {
+  return `${id}:all`;
 }

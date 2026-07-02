@@ -150,6 +150,41 @@ export async function searchMovies(
   return paginateSearchRows(filtered, page, pageSize, dedupe);
 }
 
+// ───── Full-candidate fetch (cached once per query, sliced in-memory) ─────
+const SEARCH_ALL_CAP = 300;
+
+export async function fetchAllSearchCandidates(query: string): Promise<SearchMovieRow[]> {
+  const q = query.trim();
+  if (!q) return [];
+  const parsed = parseRegularSearch(q);
+  if (parsed.hasNumberFilters && parsed.keywords.length > 0) {
+    const all = await fetchRegularSearchCandidates(q, parsed);
+    return all
+      .filter((row) => matchesRegularSearch(row, parsed))
+      .map((row) => ({ row, score: regularSearchScore(row, parsed) }))
+      .sort((a, b) => b.score - a.score || Number(b.row.id) - Number(a.row.id))
+      .map(({ row }) => row)
+      .slice(0, SEARCH_ALL_CAP);
+  }
+  if (parsed.hasNumberFilters && parsed.keywords.length === 0) return [];
+  const { rows } = await fetchWordSearchRows(q, 0, SEARCH_ALL_CAP, false);
+  return rows;
+}
+
+export function paginateCandidates(
+  rows: SearchMovieRow[],
+  page: number,
+  pageSize: number,
+  dedupe: boolean,
+): SearchMoviesResult {
+  const totalRaw = rows.length;
+  const finalRows = dedupe ? dedupeRows(rows) : rows;
+  const total = finalRows.length;
+  const hiddenDuplicates = Math.max(0, totalRaw - total);
+  const from = page * pageSize;
+  return formatSearchResult(finalRows.slice(from, from + pageSize), total, totalRaw, hiddenDuplicates);
+}
+
 async function searchWordsPaged(query: string, page: number, pageSize: number, dedupe: boolean): Promise<SearchMoviesResult> {
   if (!dedupe) {
     const { rows, totalRaw } = await fetchWordSearchRows(query, page * pageSize, pageSize, true);

@@ -150,6 +150,41 @@ export async function searchMovies(
   return paginateSearchRows(filtered, page, pageSize, dedupe);
 }
 
+// ───── Full-candidate fetch (cached once per query, sliced in-memory) ─────
+const SEARCH_ALL_CAP = 300;
+
+export async function fetchAllSearchCandidates(query: string): Promise<SearchMovieRow[]> {
+  const q = query.trim();
+  if (!q) return [];
+  const parsed = parseRegularSearch(q);
+  if (parsed.hasNumberFilters && parsed.keywords.length > 0) {
+    const all = await fetchRegularSearchCandidates(q, parsed);
+    return all
+      .filter((row) => matchesRegularSearch(row, parsed))
+      .map((row) => ({ row, score: regularSearchScore(row, parsed) }))
+      .sort((a, b) => b.score - a.score || Number(b.row.id) - Number(a.row.id))
+      .map(({ row }) => row)
+      .slice(0, SEARCH_ALL_CAP);
+  }
+  if (parsed.hasNumberFilters && parsed.keywords.length === 0) return [];
+  const { rows } = await fetchWordSearchRows(q, 0, SEARCH_ALL_CAP, false);
+  return rows;
+}
+
+export function paginateCandidates(
+  rows: SearchMovieRow[],
+  page: number,
+  pageSize: number,
+  dedupe: boolean,
+): SearchMoviesResult {
+  const totalRaw = rows.length;
+  const finalRows = dedupe ? dedupeRows(rows) : rows;
+  const total = finalRows.length;
+  const hiddenDuplicates = Math.max(0, totalRaw - total);
+  const from = page * pageSize;
+  return formatSearchResult(finalRows.slice(from, from + pageSize), total, totalRaw, hiddenDuplicates);
+}
+
 async function searchWordsPaged(query: string, page: number, pageSize: number, dedupe: boolean): Promise<SearchMoviesResult> {
   if (!dedupe) {
     const { rows, totalRaw } = await fetchWordSearchRows(query, page * pageSize, pageSize, true);
@@ -563,6 +598,28 @@ export async function cacheSearchPage(id: string, page: number, pageSize: number
   );
 }
 const PAGE_CACHE_TTL_MS = 60_000; // 60s so counts refresh as new items arrive
+const SEARCH_ALL_TTL_MS = 5 * 60_000; // 5 min: fresh enough, avoids re-search on every click
+export async function cacheSearchAll(id: string, query: string, rows: SearchMovieRow[]) {
+  const value = JSON.stringify({ kind: "search_all", query, rows, cached_at: Date.now() });
+  await admin().from("query_cache").upsert(
+    { id: allCacheId(id), query: value, created_at: new Date().toISOString() },
+    { onConflict: "id" },
+  );
+}
+export async function getCachedSearchAll(id: string): Promise<{ query: string; rows: SearchMovieRow[] } | null> {
+  const { data } = await admin().from("query_cache").select("query").eq("id", allCacheId(id)).maybeSingle();
+  const value = (data as any)?.query;
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed?.kind !== "search_all" || !Array.isArray(parsed.rows)) return null;
+    const cachedAt = typeof parsed.cached_at === "number" ? parsed.cached_at : 0;
+    if (Date.now() - cachedAt > SEARCH_ALL_TTL_MS) return null;
+    return { query: String(parsed.query || ""), rows: parsed.rows as SearchMovieRow[] };
+  } catch {
+    return null;
+  }
+}
 export async function getCachedSearchPage(id: string, page: number, pageSize: number): Promise<CachedSearchPage | null> {
   const { data } = await admin().from("query_cache").select("query").eq("id", pageCacheId(id, page, pageSize)).maybeSingle();
   const value = (data as any)?.query;
@@ -630,4 +687,7 @@ function pageStateId(scope: string) {
 }
 function pageRequestId(scope: string) {
   return `nav:${scope}`;
+}
+function allCacheId(id: string) {
+  return `${id}:all`;
 }

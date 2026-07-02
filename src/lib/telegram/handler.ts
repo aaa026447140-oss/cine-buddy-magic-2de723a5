@@ -371,8 +371,11 @@ async function safeRunSearchAndRespond(
     await runSearchAndRespond(chatId, userId, query, page, editMessageId, inGroup, queryIdOverride, latestScope, dedupe);
   } catch (e: any) {
     console.error("search failed:", e?.message || e);
-    const text = "❌ הייתה תקלה בחיפוש. נסה שוב עם שם מדויק יותר.";
-    if (editMessageId) await editMessageText(chatId, editMessageId, text).catch(() => {});
+    // When triggered from a button (editMessageId set), DO NOT overwrite the
+    // existing results with an error — that destroyed a working list. Just
+    // send a lightweight notice as a new message and keep results intact.
+    const text = "❌ הייתה תקלה זמנית. נסה שוב.";
+    if (editMessageId) await sendMessage(chatId, text).catch(() => {});
     else await sendMessage(chatId, text).catch(() => {});
   }
 }

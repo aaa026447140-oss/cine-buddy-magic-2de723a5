@@ -303,25 +303,21 @@ async function runSearchAndRespond(
   latestScope?: string,
   dedupe: boolean = true,
 ) {
-  let qid = queryIdOverride || shortId(`search-v4:${dedupe ? "d1" : "d0"}:${query}`);
-  let cachedPage = await getCachedSearchPage(qid, page, PAGE_SIZE).catch(() => null);
-  let rows = cachedPage?.rows;
-  let total = cachedPage?.total;
-  let hiddenDuplicates = (cachedPage as any)?.hiddenDuplicates as number | undefined;
-
-  if (!rows || typeof total !== "number") {
-    const fresh = await searchMovies(query, page, PAGE_SIZE, { dedupe });
-    rows = fresh.rows;
-    total = fresh.total;
-    hiddenDuplicates = fresh.hiddenDuplicates;
+  // Stable qid per query — dedupe toggle & pagination reuse the same cache.
+  const qid = queryIdOverride || shortId(`search-v5:${query}`);
+  let cached = await getCachedSearchAll(qid).catch(() => null);
+  if (!cached) {
+    const allRows = await fetchAllSearchCandidates(query);
+    cached = { query, rows: allRows };
     await Promise.all([
-      cacheQuery(qid, query, total, dedupe).catch(() => {}),
-      cacheSearchPage(qid, page, PAGE_SIZE, rows ?? [], total ?? 0, hiddenDuplicates ?? 0).catch(() => {}),
+      cacheQuery(qid, query, allRows.length, dedupe).catch(() => {}),
+      cacheSearchAll(qid, query, allRows).catch(() => {}),
     ]);
   }
-  rows = rows ?? [];
-  total = total ?? 0;
-  hiddenDuplicates = hiddenDuplicates ?? 0;
+  const sliced = paginateCandidates(cached.rows as any, page, PAGE_SIZE, dedupe);
+  const rows = sliced.rows;
+  const total = sliced.total;
+  const hiddenDuplicates = sliced.hiddenDuplicates;
   if (total === 0) {
     const txt = `❌ לא נמצאו תוצאות עבור: <b>${escapeHtml(query)}</b>`;
     if (editMessageId) await editMessageText(chatId, editMessageId, txt).catch(() => {});

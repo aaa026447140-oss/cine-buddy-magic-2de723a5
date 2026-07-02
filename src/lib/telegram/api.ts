@@ -43,6 +43,9 @@ export const getChatMember = (chat_id: number | string, user_id: number) =>
 
 export const getChat = (chat_id: number | string) => tg("getChat", { chat_id });
 
+export const getChatMemberCount = (chat_id: number | string) =>
+  tg<number>("getChatMemberCount", { chat_id });
+
 export const pinChatMessage = (chat_id: number | string, message_id: number, disable_notification = true) =>
   tg("pinChatMessage", { chat_id, message_id, disable_notification });
 

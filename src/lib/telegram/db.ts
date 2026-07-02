@@ -497,6 +497,15 @@ export async function listGroups(): Promise<number[]> {
   return (data ?? []).map((r: any) => Number(r.chat_id));
 }
 
+export async function listGroupsDetailed(): Promise<{ chat_id: number; title: string | null }[]> {
+  const { data } = await admin()
+    .from("bot_groups")
+    .select("chat_id,title")
+    .eq("is_active", true)
+    .order("last_seen", { ascending: false });
+  return (data ?? []).map((r: any) => ({ chat_id: Number(r.chat_id), title: r.title ?? null }));
+}
+
 export async function listUsers(): Promise<number[]> {
   const { data } = await admin().from("bot_users").select("telegram_id").eq("is_blocked", false);
   return (data ?? []).map((r: any) => Number(r.telegram_id));

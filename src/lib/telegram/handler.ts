@@ -574,14 +574,49 @@ async function handleAdminCallback(cq: any, data: string) {
     case "admin_close":
       return await tg("deleteMessage", { chat_id: chatId, message_id: messageId }).catch(() => {});
     case "admin_stats": {
-      const s = await stats();
+      // Show a loading state first — fetching per-group member counts can take a moment.
+      await editMessageText(chatId, messageId, "📊 טוען סטטיסטיקות מפורטות...", {
+        reply_markup: { inline_keyboard: [[{ text: "« חזרה", callback_data: "admin_open" }]] },
+      }).catch(() => {});
+      const [s, groupList] = await Promise.all([stats(), listGroupsDetailed()]);
+      // Fetch member counts in parallel, tolerate individual failures.
+      const counts = await Promise.all(
+        groupList.map(async (g) => {
+          try {
+            const n = await getChatMemberCount(g.chat_id);
+            return { ...g, count: Number(n) || 0, ok: true };
+          } catch {
+            return { ...g, count: 0, ok: false };
+          }
+        }),
+      );
+      const totalGroupMembers = counts.reduce((sum, g) => sum + g.count, 0);
+      const combinedReach = totalGroupMembers + s.users;
+      const groupLines = counts.length
+        ? counts
+            .sort((a, b) => b.count - a.count)
+            .slice(0, 60)
+            .map((g) => {
+              const name = escapeHtml(g.title || String(g.chat_id));
+              return g.ok
+                ? `• <b>${name}</b> — ${g.count.toLocaleString()} משתמשים`
+                : `• <b>${name}</b> — <i>לא זמין</i>`;
+            })
+            .join("\n")
+        : "<i>אין קבוצות פעילות.</i>";
+      const moreNote = counts.length > 60 ? `\n<i>...ועוד ${counts.length - 60} קבוצות</i>` : "";
       const text =
-        `📊 <b>סטטיסטיקות</b>\n\n` +
+        `📊 <b>סטטיסטיקות מפורטות</b>\n\n` +
         `🎬 סרטים: <b>${s.movies.toLocaleString()}</b>\n` +
-        `👤 משתמשים פעילים: <b>${s.users.toLocaleString()}</b>\n` +
+        `👤 משתמשים בפרטי: <b>${s.users.toLocaleString()}</b>\n` +
         `👥 קבוצות פעילות: <b>${s.groups.toLocaleString()}</b>\n` +
-        `⭐ סה״כ כוכבים שתרמו: <b>${s.totalStars.toLocaleString()}</b>`;
-      return await editMessageText(chatId, messageId, text, {
+        `👨‍👩‍👧 סה״כ משתמשים בקבוצות: <b>${totalGroupMembers.toLocaleString()}</b>\n` +
+        `🌐 סה״כ קהל (פרטי + קבוצות): <b>${combinedReach.toLocaleString()}</b>\n` +
+        `⭐ סה״כ כוכבים שתרמו: <b>${s.totalStars.toLocaleString()}</b>\n\n` +
+        `<b>רשימת קבוצות:</b>\n${groupLines}${moreNote}`;
+      // Telegram message hard limit is 4096 chars; trim from the middle if needed.
+      const safe = text.length > 3900 ? text.slice(0, 3900) + "\n<i>...נחתך</i>" : text;
+      return await editMessageText(chatId, messageId, safe, {
         reply_markup: { inline_keyboard: [[{ text: "« חזרה", callback_data: "admin_open" }]] },
       }).catch(() => {});
     }

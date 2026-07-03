@@ -244,7 +244,7 @@ async function fetchFastTitleSearchRows(query: string, offset: number, limit: nu
   const to = Math.max(offset, offset + limit - 1);
   let req: any = admin().from("movies").select(MOVIE_RESULT_COLUMNS);
   for (const w of words) req = req.ilike("title", `%${escapePostgrestLike(w)}%`);
-  const { data, error } = await req.order("id", { ascending: false }).range(offset, to);
+  const { data, error } = await req.range(offset, to);
   if (error && words.length > 1) return fetchFastTitleSearchRows(words[0], offset, limit);
   if (error) throw error;
   const rows = (data ?? []) as SearchMovieRow[];
@@ -290,7 +290,7 @@ async function fetchRegularTitleCandidates(parsed: ParsedRegularSearch): Promise
   for (const word of parsed.keywords.slice(0, Math.min(SEARCH_WORD_LIMIT, 4))) {
     req = req.ilike("title", `%${escapePostgrestLike(word)}%`);
   }
-  const { data, error } = await req.order("id", { ascending: false }).range(0, REGULAR_SEARCH_SCAN_LIMIT - 1);
+  const { data, error } = await req.range(0, REGULAR_SEARCH_SCAN_LIMIT - 1);
   if (error) throw error;
   return (data ?? []) as SearchMovieRow[];
 }

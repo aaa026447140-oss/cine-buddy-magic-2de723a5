@@ -257,7 +257,7 @@ function buildWordSearchRequest(query: string, withCount: boolean): any {
   const countMode = "planned";
   let req: any = admin().from("movies").select(MOVIE_RESULT_COLUMNS, withCount ? { count: countMode } : undefined);
   for (const w of words) req = req.or(ilikeAnyField(w));
-  return req.order("id", { ascending: false });
+  return req;
 }
 
 function pageSizeFallback(limit: number) {

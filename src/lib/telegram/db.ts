@@ -98,7 +98,7 @@ const WORD_SEARCH_DEDUPE_OVERFETCH = 8;
 const WORD_SEARCH_MIN_WINDOW = 100;
 const WORD_SEARCH_MAX_WINDOW = 500;
 const REGULAR_SEARCH_BATCH = 500;
-const REGULAR_SEARCH_SCAN_LIMIT = 3000;
+const REGULAR_SEARCH_SCAN_LIMIT = 1000;
 const MOVIE_SEARCH_COLUMNS = "id,title,message_id,source_channel_id,raw_caption,file_unique_id,file_type,file_size";
 const MOVIE_RESULT_COLUMNS = "id,title,message_id,source_channel_id,file_unique_id,file_type,file_size";
 
@@ -254,7 +254,7 @@ async function fetchFastTitleSearchRows(query: string, offset: number, limit: nu
 
 function buildWordSearchRequest(query: string, withCount: boolean): any {
   const words = query.split(/\s+/).filter(Boolean).slice(0, SEARCH_WORD_LIMIT);
-  const countMode = words.length <= 1 ? "planned" : "exact";
+  const countMode = "planned";
   let req: any = admin().from("movies").select(MOVIE_RESULT_COLUMNS, withCount ? { count: countMode } : undefined);
   for (const w of words) req = req.or(ilikeAnyField(w));
   return req.order("id", { ascending: false });
@@ -356,7 +356,7 @@ function numericBaseConditions(parsed: ParsedRegularSearch) {
       add("raw_caption", form);
     }
   }
-  return conditions.slice(0, 80);
+  return conditions.slice(0, 20);
 }
 
 function parseRegularSearch(query: string): ParsedRegularSearch {

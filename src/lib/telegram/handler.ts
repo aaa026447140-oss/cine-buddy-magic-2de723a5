@@ -306,7 +306,7 @@ async function runSearchAndRespond(
   dedupe: boolean = true,
 ) {
   // Stable qid per query — dedupe toggle & pagination reuse the same cache.
-  const qid = queryIdOverride || shortId(`search-v5:${query}`);
+  const qid = queryIdOverride || shortId(`search-v6:${query}`);
   let cached = await getCachedSearchAll(qid).catch(() => null);
   if (!cached) {
     const allRows = await fetchAllSearchCandidates(query);

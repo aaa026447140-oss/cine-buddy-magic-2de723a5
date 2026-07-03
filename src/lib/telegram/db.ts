@@ -98,7 +98,7 @@ const WORD_SEARCH_DEDUPE_OVERFETCH = 8;
 const WORD_SEARCH_MIN_WINDOW = 100;
 const WORD_SEARCH_MAX_WINDOW = 500;
 const REGULAR_SEARCH_BATCH = 500;
-const REGULAR_SEARCH_SCAN_LIMIT = 3000;
+const REGULAR_SEARCH_SCAN_LIMIT = 1000;
 const MOVIE_SEARCH_COLUMNS = "id,title,message_id,source_channel_id,raw_caption,file_unique_id,file_type,file_size";
 const MOVIE_RESULT_COLUMNS = "id,title,message_id,source_channel_id,file_unique_id,file_type,file_size";
 
@@ -169,7 +169,9 @@ export async function fetchAllSearchCandidates(query: string): Promise<SearchMov
       .slice(0, SEARCH_ALL_CAP);
   }
   if (parsed.hasNumberFilters && parsed.keywords.length === 0) return [];
-  const { rows } = await fetchWordSearchRows(q, 0, SEARCH_ALL_CAP, false);
+  const titleRows = await fetchFastTitleSearchRows(q, 0, SEARCH_ALL_CAP).then((r) => r.rows).catch(() => []);
+  if (titleRows.length > 0) return titleRows;
+  const { rows } = await fetchWordSearchRows(q, 0, SEARCH_ALL_CAP, false).catch(() => ({ rows: [], totalRaw: 0 }));
   return rows;
 }
 
@@ -231,18 +233,31 @@ async function fetchWordSearchRows(query: string, offset: number, limit: number,
   const req = buildWordSearchRequest(query, withCount).range(offset, to);
   const { data, error, count } = await req;
   if (error && withCount) return fetchWordSearchRows(query, offset, limit, false);
-  if (error) throw error;
+  if (error) return fetchFastTitleSearchRows(query, offset, limit);
   const rows = (data ?? []) as SearchMovieRow[];
   const fallbackTotal = offset + rows.length + (rows.length === limit ? pageSizeFallback(limit) : 0);
   return { rows, totalRaw: typeof count === "number" ? count : fallbackTotal };
 }
 
+async function fetchFastTitleSearchRows(query: string, offset: number, limit: number): Promise<{ rows: SearchMovieRow[]; totalRaw: number }> {
+  const words = query.split(/\s+/).filter(Boolean).slice(0, Math.min(SEARCH_WORD_LIMIT, 3));
+  const to = Math.max(offset, offset + limit - 1);
+  let req: any = admin().from("movies").select(MOVIE_RESULT_COLUMNS);
+  for (const w of words) req = req.ilike("title", `%${escapePostgrestLike(w)}%`);
+  const { data, error } = await req.range(offset, to);
+  if (error && words.length > 1) return fetchFastTitleSearchRows(words[0], offset, limit);
+  if (error) throw error;
+  const rows = (data ?? []) as SearchMovieRow[];
+  const fallbackTotal = offset + rows.length + (rows.length === limit ? pageSizeFallback(limit) : 0);
+  return { rows, totalRaw: fallbackTotal };
+}
+
 function buildWordSearchRequest(query: string, withCount: boolean): any {
   const words = query.split(/\s+/).filter(Boolean).slice(0, SEARCH_WORD_LIMIT);
-  const countMode = words.length <= 1 ? "planned" : "exact";
+  const countMode = "planned";
   let req: any = admin().from("movies").select(MOVIE_RESULT_COLUMNS, withCount ? { count: countMode } : undefined);
   for (const w of words) req = req.or(ilikeAnyField(w));
-  return req.order("id", { ascending: false });
+  return req;
 }
 
 function pageSizeFallback(limit: number) {
@@ -250,16 +265,34 @@ function pageSizeFallback(limit: number) {
 }
 
 async function fetchRegularSearchCandidates(query: string, parsed: ParsedRegularSearch): Promise<SearchMovieRow[]> {
+  const titleFirst = await fetchRegularTitleCandidates(parsed).catch(() => []);
+  if (titleFirst.length > 0) return titleFirst;
+
   const candidates: SearchMovieRow[] = [];
-  for (let from = 0; from < REGULAR_SEARCH_SCAN_LIMIT; from += REGULAR_SEARCH_BATCH) {
-    const to = Math.min(from + REGULAR_SEARCH_BATCH - 1, REGULAR_SEARCH_SCAN_LIMIT - 1);
-    const { data, error } = await buildRegularSearchRequest(query, parsed).range(from, to);
-    if (error) throw error;
-    const batch = (data ?? []) as SearchMovieRow[];
-    candidates.push(...batch);
-    if (batch.length < REGULAR_SEARCH_BATCH) break;
+  try {
+    for (let from = 0; from < REGULAR_SEARCH_SCAN_LIMIT; from += REGULAR_SEARCH_BATCH) {
+      const to = Math.min(from + REGULAR_SEARCH_BATCH - 1, REGULAR_SEARCH_SCAN_LIMIT - 1);
+      const { data, error } = await buildRegularSearchRequest(query, parsed).range(from, to);
+      if (error) throw error;
+      const batch = (data ?? []) as SearchMovieRow[];
+      candidates.push(...batch);
+      if (batch.length < REGULAR_SEARCH_BATCH) break;
+    }
+  } catch {
+    return titleFirst;
   }
   return candidates;
+}
+
+async function fetchRegularTitleCandidates(parsed: ParsedRegularSearch): Promise<SearchMovieRow[]> {
+  if (parsed.keywords.length === 0) return [];
+  let req: any = admin().from("movies").select(MOVIE_SEARCH_COLUMNS);
+  for (const word of parsed.keywords.slice(0, Math.min(SEARCH_WORD_LIMIT, 4))) {
+    req = req.ilike("title", `%${escapePostgrestLike(word)}%`);
+  }
+  const { data, error } = await req.range(0, REGULAR_SEARCH_SCAN_LIMIT - 1);
+  if (error) throw error;
+  return (data ?? []) as SearchMovieRow[];
 }
 
 function buildRegularSearchRequest(query: string, parsed: ParsedRegularSearch): any {
@@ -323,7 +356,7 @@ function numericBaseConditions(parsed: ParsedRegularSearch) {
       add("raw_caption", form);
     }
   }
-  return conditions.slice(0, 80);
+  return conditions.slice(0, 20);
 }
 
 function parseRegularSearch(query: string): ParsedRegularSearch {

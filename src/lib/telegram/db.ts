@@ -231,10 +231,23 @@ async function fetchWordSearchRows(query: string, offset: number, limit: number,
   const req = buildWordSearchRequest(query, withCount).range(offset, to);
   const { data, error, count } = await req;
   if (error && withCount) return fetchWordSearchRows(query, offset, limit, false);
-  if (error) throw error;
+  if (error) return fetchFastTitleSearchRows(query, offset, limit);
   const rows = (data ?? []) as SearchMovieRow[];
   const fallbackTotal = offset + rows.length + (rows.length === limit ? pageSizeFallback(limit) : 0);
   return { rows, totalRaw: typeof count === "number" ? count : fallbackTotal };
+}
+
+async function fetchFastTitleSearchRows(query: string, offset: number, limit: number): Promise<{ rows: SearchMovieRow[]; totalRaw: number }> {
+  const words = query.split(/\s+/).filter(Boolean).slice(0, Math.min(SEARCH_WORD_LIMIT, 3));
+  const to = Math.max(offset, offset + limit - 1);
+  let req: any = admin().from("movies").select(MOVIE_RESULT_COLUMNS);
+  for (const w of words) req = req.ilike("title", `%${escapePostgrestLike(w)}%`);
+  const { data, error } = await req.order("id", { ascending: false }).range(offset, to);
+  if (error && words.length > 1) return fetchFastTitleSearchRows(words[0], offset, limit);
+  if (error) throw error;
+  const rows = (data ?? []) as SearchMovieRow[];
+  const fallbackTotal = offset + rows.length + (rows.length === limit ? pageSizeFallback(limit) : 0);
+  return { rows, totalRaw: fallbackTotal };
 }
 
 function buildWordSearchRequest(query: string, withCount: boolean): any {
@@ -250,16 +263,34 @@ function pageSizeFallback(limit: number) {
 }
 
 async function fetchRegularSearchCandidates(query: string, parsed: ParsedRegularSearch): Promise<SearchMovieRow[]> {
+  const titleFirst = await fetchRegularTitleCandidates(parsed).catch(() => []);
+  if (titleFirst.length > 0) return titleFirst;
+
   const candidates: SearchMovieRow[] = [];
-  for (let from = 0; from < REGULAR_SEARCH_SCAN_LIMIT; from += REGULAR_SEARCH_BATCH) {
-    const to = Math.min(from + REGULAR_SEARCH_BATCH - 1, REGULAR_SEARCH_SCAN_LIMIT - 1);
-    const { data, error } = await buildRegularSearchRequest(query, parsed).range(from, to);
-    if (error) throw error;
-    const batch = (data ?? []) as SearchMovieRow[];
-    candidates.push(...batch);
-    if (batch.length < REGULAR_SEARCH_BATCH) break;
+  try {
+    for (let from = 0; from < REGULAR_SEARCH_SCAN_LIMIT; from += REGULAR_SEARCH_BATCH) {
+      const to = Math.min(from + REGULAR_SEARCH_BATCH - 1, REGULAR_SEARCH_SCAN_LIMIT - 1);
+      const { data, error } = await buildRegularSearchRequest(query, parsed).range(from, to);
+      if (error) throw error;
+      const batch = (data ?? []) as SearchMovieRow[];
+      candidates.push(...batch);
+      if (batch.length < REGULAR_SEARCH_BATCH) break;
+    }
+  } catch {
+    return titleFirst;
   }
   return candidates;
+}
+
+async function fetchRegularTitleCandidates(parsed: ParsedRegularSearch): Promise<SearchMovieRow[]> {
+  if (parsed.keywords.length === 0) return [];
+  let req: any = admin().from("movies").select(MOVIE_SEARCH_COLUMNS);
+  for (const word of parsed.keywords.slice(0, Math.min(SEARCH_WORD_LIMIT, 4))) {
+    req = req.ilike("title", `%${escapePostgrestLike(word)}%`);
+  }
+  const { data, error } = await req.order("id", { ascending: false }).range(0, REGULAR_SEARCH_SCAN_LIMIT - 1);
+  if (error) throw error;
+  return (data ?? []) as SearchMovieRow[];
 }
 
 function buildRegularSearchRequest(query: string, parsed: ParsedRegularSearch): any {

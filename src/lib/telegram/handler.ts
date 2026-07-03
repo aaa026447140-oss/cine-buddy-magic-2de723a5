@@ -502,13 +502,14 @@ async function handleCallback(cq: any) {
     const [, qid, pageText] = data.split(":");
     const page = Number(pageText);
     const cached = await getCachedSearch(qid);
-    if (!cached?.query || !Number.isInteger(page) || page < 0) {
-      await sendMessage(chatId, "❌ פג תוקף החיפוש. שלח שוב את שם הסרט.").catch(() => {});
+    const recovered = cached?.query || queryFromMessageText(msg.text);
+    if (!recovered || !Number.isInteger(page) || page < 0) {
+      await answerCallbackQuery(cq.id, { text: "פג תוקף החיפוש — שלח שוב את השם", show_alert: true }).catch(() => {});
       return;
     }
     if (page === pageFromMessageText(msg.text)) return;
     const inGroup = msg.chat.type !== "private";
-    await safeRunSearchAndRespond(chatId, from.id, cached.query, page, msg.message_id, inGroup, qid, `${chatId}:${msg.message_id}`, cached.dedupe !== false);
+    await safeRunSearchAndRespond(chatId, from.id, recovered, page, msg.message_id, inGroup, qid, `${chatId}:${msg.message_id}`, cached?.dedupe !== false);
     return;
   }
 
@@ -516,13 +517,14 @@ async function handleCallback(cq: any) {
     const [, qid, pageText] = data.split(":");
     const page = Number(pageText);
     const cached = await getCachedSearch(qid);
-    if (!cached?.query || !Number.isInteger(page) || page < 0) {
-      await editMessageText(chatId, msg.message_id, "❌ פג תוקף החיפוש. שלח שוב את שם הסרט.").catch(() => {});
+    const recovered = cached?.query || queryFromMessageText(msg.text);
+    if (!recovered || !Number.isInteger(page) || page < 0) {
+      await answerCallbackQuery(cq.id, { text: "פג תוקף החיפוש — שלח שוב את השם", show_alert: true }).catch(() => {});
       return;
     }
     if (page === pageFromMessageText(msg.text)) return;
     const inGroup = msg.chat.type !== "private";
-    await safeRunSearchAndRespond(chatId, from.id, cached.query, page, msg.message_id, inGroup, qid, `${chatId}:${msg.message_id}`, cached.dedupe !== false);
+    await safeRunSearchAndRespond(chatId, from.id, recovered, page, msg.message_id, inGroup, qid, `${chatId}:${msg.message_id}`, cached?.dedupe !== false);
     return;
   }
 
@@ -535,12 +537,13 @@ async function handleCallback(cq: any) {
     const currentPage = pageFromMessageText(msg.text);
     const page = action === "n" ? currentPage + 1 : action === "p" ? currentPage - 1 : Number(action);
     const cached = await getCachedSearch(qid);
-    if (!cached?.query || !Number.isFinite(page) || page < 0) {
-      await editMessageText(chatId, msg.message_id, "❌ פג תוקף החיפוש. שלח שוב את שם הסרט.").catch(() => {});
+    const recovered = cached?.query || queryFromMessageText(msg.text);
+    if (!recovered || !Number.isFinite(page) || page < 0) {
+      await answerCallbackQuery(cq.id, { text: "פג תוקף החיפוש — שלח שוב את השם", show_alert: true }).catch(() => {});
       return;
     }
     const inGroup = msg.chat.type !== "private";
-    await safeRunSearchAndRespond(chatId, from.id, cached.query, page, msg.message_id, inGroup, qid, latestScope, cached.dedupe !== false);
+    await safeRunSearchAndRespond(chatId, from.id, recovered, page, msg.message_id, inGroup, qid, latestScope, cached?.dedupe !== false);
     return;
   }
 

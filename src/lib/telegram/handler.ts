@@ -428,14 +428,15 @@ async function handleCallback(cq: any) {
   if (data.startsWith("dup:")) {
     const [, qid, flag] = data.split(":");
     const cached = await getCachedSearch(qid);
-    if (!cached?.query) {
+    const recovered = cached?.query || queryFromMessageText(msg.text);
+    if (!recovered) {
       answerCallbackQuery(cq.id, { text: "❌ פג תוקף החיפוש", show_alert: true }).catch(() => {});
       return;
     }
     answerCallbackQuery(cq.id).catch(() => {});
     const newDedupe = flag === "1";
     const inGroup = msg.chat.type !== "private";
-    await safeRunSearchAndRespond(chatId, from.id, cached.query, 0, msg.message_id, inGroup, undefined, `${chatId}:${msg.message_id}`, newDedupe);
+    await safeRunSearchAndRespond(chatId, from.id, recovered, 0, msg.message_id, inGroup, undefined, `${chatId}:${msg.message_id}`, newDedupe);
     return;
   }
 

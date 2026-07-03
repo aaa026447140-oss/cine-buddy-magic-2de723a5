@@ -447,6 +447,56 @@ async function handleCallback(cq: any) {
     return;
   }
 
+  if (data === "ads_menu") {
+    await answerCallbackQuery(cq.id);
+    await editMessageText(chatId, msg.message_id, "📢 טוען נתוני חשיפה...", {
+      reply_markup: { inline_keyboard: [[{ text: "« חזרה", callback_data: "back_to_start" }]] },
+    }).catch(() => {});
+    const [users, groups] = await Promise.all([listUsers(), listGroupsDetailed()]);
+    const groupCounts = await Promise.all(
+      groups.map(async (g) => {
+        try { return Number(await getChatMemberCount(g.chat_id)) || 0; } catch { return 0; }
+      }),
+    );
+    const totalGroupMembers = groupCounts.reduce((a, b) => a + b, 0);
+    const totalPrivate = users.length;
+    const combined = totalGroupMembers + totalPrivate;
+    const text =
+      `📢 <b>פרסום ממומן</b>\n\n` +
+      `הבוט שלנו פעיל בעשרות קבוצות ואלפי משתמשים פרטיים —\n` +
+      `הפרסומת שלך תגיע לקהל אמיתי וממוקד.\n\n` +
+      `👨‍👩‍👧 סה״כ משתמשים בקבוצות: <b>${totalGroupMembers.toLocaleString()}</b>\n` +
+      `👤 סה״כ משתמשים בפרטי: <b>${totalPrivate.toLocaleString()}</b>\n` +
+      `🌐 סה״כ חשיפה משוערת: <b>${combined.toLocaleString()}</b>\n\n` +
+      `רוצה לפרסם? לחץ על הכפתור למטה.`;
+    await editMessageText(chatId, msg.message_id, text, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "📝 אני רוצה לפרסם", callback_data: "ads_contact" }],
+          [{ text: "« חזרה", callback_data: "back_to_start" }],
+        ],
+      },
+    }).catch(() => {});
+    return;
+  }
+
+  if (data === "ads_contact") {
+    await answerCallbackQuery(cq.id);
+    const text =
+      `📝 <b>הזמנת פרסום ממומן</b>\n\n` +
+      `לפרטים, מחירים ותיאום פרסום — פנה אל:\n` +
+      `👤 @Ahdhfufhtj`;
+    await editMessageText(chatId, msg.message_id, text, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "💬 פנייה למפרסם", url: "https://t.me/Ahdhfufhtj" }],
+          [{ text: "« חזרה", callback_data: "ads_menu" }],
+        ],
+      },
+    }).catch(() => {});
+    return;
+  }
+
   if (data === "support_menu") {
     await answerCallbackQuery(cq.id);
     await editMessageText(

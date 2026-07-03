@@ -169,7 +169,9 @@ export async function fetchAllSearchCandidates(query: string): Promise<SearchMov
       .slice(0, SEARCH_ALL_CAP);
   }
   if (parsed.hasNumberFilters && parsed.keywords.length === 0) return [];
-  const { rows } = await fetchWordSearchRows(q, 0, SEARCH_ALL_CAP, false);
+  const titleRows = await fetchFastTitleSearchRows(q, 0, SEARCH_ALL_CAP).then((r) => r.rows).catch(() => []);
+  if (titleRows.length > 0) return titleRows;
+  const { rows } = await fetchWordSearchRows(q, 0, SEARCH_ALL_CAP, false).catch(() => ({ rows: [], totalRaw: 0 }));
   return rows;
 }
 

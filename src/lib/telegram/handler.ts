@@ -919,6 +919,18 @@ function pageFromMessageText(text?: string): number {
   return Number.isFinite(oneBasedPage) && oneBasedPage > 0 ? oneBasedPage - 1 : 0;
 }
 
+// Recover the original search query from a results message text.
+// The header we render is:
+//   🔎 תוצאות עבור: <QUERY>\nנמצאו ...
+// Telegram strips HTML on delivery, so we just take the first line's suffix.
+function queryFromMessageText(text?: string): string | null {
+  if (!text) return null;
+  const line = text.split("\n")[0] || "";
+  const m = line.match(/תוצאות עבור:\s*(.+?)\s*$/);
+  const q = m ? m[1].trim() : "";
+  return q.length >= 2 ? q : null;
+}
+
 // Short stable id for callback_data (8 hex chars from SHA-1 of query).
 function shortId(s: string): string {
   // Tiny non-crypto hash, no Node 'crypto' dep needed here.

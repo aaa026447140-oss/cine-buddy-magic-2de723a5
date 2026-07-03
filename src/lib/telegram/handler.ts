@@ -428,14 +428,15 @@ async function handleCallback(cq: any) {
   if (data.startsWith("dup:")) {
     const [, qid, flag] = data.split(":");
     const cached = await getCachedSearch(qid);
-    if (!cached?.query) {
+    const recovered = cached?.query || queryFromMessageText(msg.text);
+    if (!recovered) {
       answerCallbackQuery(cq.id, { text: "❌ פג תוקף החיפוש", show_alert: true }).catch(() => {});
       return;
     }
     answerCallbackQuery(cq.id).catch(() => {});
     const newDedupe = flag === "1";
     const inGroup = msg.chat.type !== "private";
-    await safeRunSearchAndRespond(chatId, from.id, cached.query, 0, msg.message_id, inGroup, undefined, `${chatId}:${msg.message_id}`, newDedupe);
+    await safeRunSearchAndRespond(chatId, from.id, recovered, 0, msg.message_id, inGroup, undefined, `${chatId}:${msg.message_id}`, newDedupe);
     return;
   }
 
@@ -443,6 +444,56 @@ async function handleCallback(cq: any) {
     await answerCallbackQuery(cq.id);
     const v = await buildStartView(from.id);
     await editMessageText(chatId, msg.message_id, v.text, { reply_markup: v.reply_markup }).catch(() => {});
+    return;
+  }
+
+  if (data === "ads_menu") {
+    await answerCallbackQuery(cq.id);
+    await editMessageText(chatId, msg.message_id, "📢 טוען נתוני חשיפה...", {
+      reply_markup: { inline_keyboard: [[{ text: "« חזרה", callback_data: "back_to_start" }]] },
+    }).catch(() => {});
+    const [users, groups] = await Promise.all([listUsers(), listGroupsDetailed()]);
+    const groupCounts = await Promise.all(
+      groups.map(async (g) => {
+        try { return Number(await getChatMemberCount(g.chat_id)) || 0; } catch { return 0; }
+      }),
+    );
+    const totalGroupMembers = groupCounts.reduce((a, b) => a + b, 0);
+    const totalPrivate = users.length;
+    const combined = totalGroupMembers + totalPrivate;
+    const text =
+      `📢 <b>פרסום ממומן</b>\n\n` +
+      `הבוט שלנו פעיל בעשרות קבוצות ואלפי משתמשים פרטיים —\n` +
+      `הפרסומת שלך תגיע לקהל אמיתי וממוקד.\n\n` +
+      `👨‍👩‍👧 סה״כ משתמשים בקבוצות: <b>${totalGroupMembers.toLocaleString()}</b>\n` +
+      `👤 סה״כ משתמשים בפרטי: <b>${totalPrivate.toLocaleString()}</b>\n` +
+      `🌐 סה״כ חשיפה משוערת: <b>${combined.toLocaleString()}</b>\n\n` +
+      `רוצה לפרסם? לחץ על הכפתור למטה.`;
+    await editMessageText(chatId, msg.message_id, text, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "📝 אני רוצה לפרסם", callback_data: "ads_contact" }],
+          [{ text: "« חזרה", callback_data: "back_to_start" }],
+        ],
+      },
+    }).catch(() => {});
+    return;
+  }
+
+  if (data === "ads_contact") {
+    await answerCallbackQuery(cq.id);
+    const text =
+      `📝 <b>הזמנת פרסום ממומן</b>\n\n` +
+      `לפרטים, מחירים ותיאום פרסום — פנה אל:\n` +
+      `👤 @Ahdhfufhtj`;
+    await editMessageText(chatId, msg.message_id, text, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "💬 פנייה למפרסם", url: "https://t.me/Ahdhfufhtj" }],
+          [{ text: "« חזרה", callback_data: "ads_menu" }],
+        ],
+      },
+    }).catch(() => {});
     return;
   }
 
@@ -502,13 +553,14 @@ async function handleCallback(cq: any) {
     const [, qid, pageText] = data.split(":");
     const page = Number(pageText);
     const cached = await getCachedSearch(qid);
-    if (!cached?.query || !Number.isInteger(page) || page < 0) {
-      await sendMessage(chatId, "❌ פג תוקף החיפוש. שלח שוב את שם הסרט.").catch(() => {});
+    const recovered = cached?.query || queryFromMessageText(msg.text);
+    if (!recovered || !Number.isInteger(page) || page < 0) {
+      await answerCallbackQuery(cq.id, { text: "פג תוקף החיפוש — שלח שוב את השם", show_alert: true }).catch(() => {});
       return;
     }
     if (page === pageFromMessageText(msg.text)) return;
     const inGroup = msg.chat.type !== "private";
-    await safeRunSearchAndRespond(chatId, from.id, cached.query, page, msg.message_id, inGroup, qid, `${chatId}:${msg.message_id}`, cached.dedupe !== false);
+    await safeRunSearchAndRespond(chatId, from.id, recovered, page, msg.message_id, inGroup, qid, `${chatId}:${msg.message_id}`, cached?.dedupe !== false);
     return;
   }
 
@@ -516,13 +568,14 @@ async function handleCallback(cq: any) {
     const [, qid, pageText] = data.split(":");
     const page = Number(pageText);
     const cached = await getCachedSearch(qid);
-    if (!cached?.query || !Number.isInteger(page) || page < 0) {
-      await editMessageText(chatId, msg.message_id, "❌ פג תוקף החיפוש. שלח שוב את שם הסרט.").catch(() => {});
+    const recovered = cached?.query || queryFromMessageText(msg.text);
+    if (!recovered || !Number.isInteger(page) || page < 0) {
+      await answerCallbackQuery(cq.id, { text: "פג תוקף החיפוש — שלח שוב את השם", show_alert: true }).catch(() => {});
       return;
     }
     if (page === pageFromMessageText(msg.text)) return;
     const inGroup = msg.chat.type !== "private";
-    await safeRunSearchAndRespond(chatId, from.id, cached.query, page, msg.message_id, inGroup, qid, `${chatId}:${msg.message_id}`, cached.dedupe !== false);
+    await safeRunSearchAndRespond(chatId, from.id, recovered, page, msg.message_id, inGroup, qid, `${chatId}:${msg.message_id}`, cached?.dedupe !== false);
     return;
   }
 
@@ -535,12 +588,13 @@ async function handleCallback(cq: any) {
     const currentPage = pageFromMessageText(msg.text);
     const page = action === "n" ? currentPage + 1 : action === "p" ? currentPage - 1 : Number(action);
     const cached = await getCachedSearch(qid);
-    if (!cached?.query || !Number.isFinite(page) || page < 0) {
-      await editMessageText(chatId, msg.message_id, "❌ פג תוקף החיפוש. שלח שוב את שם הסרט.").catch(() => {});
+    const recovered = cached?.query || queryFromMessageText(msg.text);
+    if (!recovered || !Number.isFinite(page) || page < 0) {
+      await answerCallbackQuery(cq.id, { text: "פג תוקף החיפוש — שלח שוב את השם", show_alert: true }).catch(() => {});
       return;
     }
     const inGroup = msg.chat.type !== "private";
-    await safeRunSearchAndRespond(chatId, from.id, cached.query, page, msg.message_id, inGroup, qid, latestScope, cached.dedupe !== false);
+    await safeRunSearchAndRespond(chatId, from.id, recovered, page, msg.message_id, inGroup, qid, latestScope, cached?.dedupe !== false);
     return;
   }
 
@@ -917,6 +971,18 @@ function pageFromMessageText(text?: string): number {
   const match = (text || "").match(/עמוד\s+(\d+)\s*\/\s*\d+/);
   const oneBasedPage = match ? Number(match[1]) : 1;
   return Number.isFinite(oneBasedPage) && oneBasedPage > 0 ? oneBasedPage - 1 : 0;
+}
+
+// Recover the original search query from a results message text.
+// The header we render is:
+//   🔎 תוצאות עבור: <QUERY>\nנמצאו ...
+// Telegram strips HTML on delivery, so we just take the first line's suffix.
+function queryFromMessageText(text?: string): string | null {
+  if (!text) return null;
+  const line = text.split("\n")[0] || "";
+  const m = line.match(/תוצאות עבור:\s*(.+?)\s*$/);
+  const q = m ? m[1].trim() : "";
+  return q.length >= 2 ? q : null;
 }
 
 // Short stable id for callback_data (8 hex chars from SHA-1 of query).

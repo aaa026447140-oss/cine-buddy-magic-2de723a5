@@ -762,10 +762,6 @@ async function handleAdminCallback(cq: any, data: string) {
           "שלח /cancel לביטול.",
       );
   }
-  if (data.startsWith("admin_src_rm_")) {
-    // handled below
-  }
-
   if (data === "admin_users") {
     return await renderUsersList(chatId, messageId, "");
   }

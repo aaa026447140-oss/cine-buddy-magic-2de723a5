@@ -273,7 +273,6 @@ async function buildStartView(userId: number) {
     `📥 אני אחזיר לך תוצאות מהמאגר. לחץ על השם של הסרט כדי לקבל אותו.\n` +
     `📚 אם יש הרבה תוצאות — אפשר לדפדף בעמודים בעזרת הכפתורים למטה.\n\n` +
     `💡 ניתן גם להוסיף אותי לקבוצות ולחפש שם.`;
-  void settings;
   const kb = startMenuKeyboard(settings, me.username);
   if (await isAdmin(userId)) {
     kb.inline_keyboard.unshift([{ text: "⚙️ לוח אדמין", callback_data: "admin_open" }]);

@@ -96,6 +96,7 @@ export function adminPanelKeyboard(isMain: boolean) {
   }
   rows.push([{ text: "🔎 הגדרת קבוצת חיפוש", callback_data: "admin_set_search_group" }]);
   rows.push([{ text: "📊 סטטיסטיקות", callback_data: "admin_stats" }]);
+  rows.push([{ text: "👤 משתמשים", callback_data: "admin_users" }]);
   rows.push([{ text: "📣 שידור לפרטיים", callback_data: "admin_bc_private" }]);
   rows.push([{ text: "📣 שידור לקבוצות", callback_data: "admin_bc_groups" }]);
   rows.push([{ text: "📣 שידור לכולם", callback_data: "admin_bc_all" }]);

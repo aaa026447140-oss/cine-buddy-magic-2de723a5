@@ -80,6 +80,55 @@ export async function markUserBlocked(telegram_id: number) {
   await admin().from("bot_users").update({ is_blocked: true }).eq("telegram_id", telegram_id);
 }
 
+export async function unmarkUserBlocked(telegram_id: number) {
+  await admin().from("bot_users").update({ is_blocked: false }).eq("telegram_id", telegram_id);
+}
+
+export type BotUserRow = {
+  telegram_id: number;
+  username: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  is_blocked: boolean;
+  first_seen: string;
+  last_seen: string;
+};
+
+export async function searchBotUsers(query: string, limit = 20): Promise<BotUserRow[]> {
+  const q = query.trim();
+  const a = admin();
+  let req: any = a.from("bot_users").select("telegram_id,username,first_name,last_name,is_blocked,first_seen,last_seen");
+  if (q) {
+    if (/^-?\d+$/.test(q)) {
+      req = req.eq("telegram_id", Number(q));
+    } else {
+      const clean = q.replace(/^@/, "").replace(/[%,()]/g, "");
+      req = req.or(
+        `username.ilike.%${clean}%,first_name.ilike.%${clean}%,last_name.ilike.%${clean}%`,
+      );
+    }
+  }
+  const { data } = await req.order("last_seen", { ascending: false }).limit(limit);
+  return ((data ?? []) as any) as BotUserRow[];
+}
+
+export async function getBotUser(telegram_id: number): Promise<BotUserRow | null> {
+  const { data } = await admin()
+    .from("bot_users")
+    .select("telegram_id,username,first_name,last_name,is_blocked,first_seen,last_seen")
+    .eq("telegram_id", telegram_id)
+    .maybeSingle();
+  return (data as any) ?? null;
+}
+
+export async function userStars(telegram_id: number): Promise<number> {
+  const { data } = await admin()
+    .from("star_payments")
+    .select("stars_amount")
+    .eq("telegram_user_id", telegram_id);
+  return (data ?? []).reduce((s: number, p: any) => s + (p.stars_amount || 0), 0);
+}
+
 export async function indexMovie(m: {
   source_channel_id: number;
   message_id: number;

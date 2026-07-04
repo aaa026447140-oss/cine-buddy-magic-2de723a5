@@ -20,6 +20,7 @@ import {
   getCachedSearch,
   getCachedSearchAll,
   getAdminState,
+  getBotUser,
   getMovieById,
   getSettings,
   indexMovie,
@@ -32,18 +33,22 @@ import {
   listUsers,
   markGroupInactive,
   markUserBlocked,
+  unmarkUserBlocked,
   recordPayment,
   removeAdmin,
   removeSourceChannel,
   fetchAllSearchCandidates,
   paginateCandidates,
+  searchBotUsers,
   setAdminState,
   setPageState,
   stats,
   updateSettings,
   upsertGroup,
   upsertUser,
+  userStars,
   type BotSettings,
+  type BotUserRow,
 } from "./db";
 import {
   adminPanelKeyboard,
@@ -267,8 +272,7 @@ async function buildStartView(userId: number) {
     `לדוגמה: <code>הארי פוטר</code> או <code>Inception</code>\n\n` +
     `📥 אני אחזיר לך תוצאות מהמאגר. לחץ על השם של הסרט כדי לקבל אותו.\n` +
     `📚 אם יש הרבה תוצאות — אפשר לדפדף בעמודים בעזרת הכפתורים למטה.\n\n` +
-    `💡 ניתן גם להוסיף אותי לקבוצות ולחפש שם.\n\n` +
-    `נבנה על ידי @${settings.builder_username?.replace(/^@/, "") || "Hsshsusudjd"}`;
+    `💡 ניתן גם להוסיף אותי לקבוצות ולחפש שם.`;
   const kb = startMenuKeyboard(settings, me.username);
   if (await isAdmin(userId)) {
     kb.inline_keyboard.unshift([{ text: "⚙️ לוח אדמין", callback_data: "admin_open" }]);
@@ -463,8 +467,6 @@ async function handleCallback(cq: any) {
     const combined = totalGroupMembers + totalPrivate;
     const text =
       `📢 <b>פרסום ממומן</b>\n\n` +
-      `הבוט שלנו פעיל בעשרות קבוצות ואלפי משתמשים פרטיים —\n` +
-      `הפרסומת שלך תגיע לקהל אמיתי וממוקד.\n\n` +
       `👨‍👩‍👧 סה״כ משתמשים בקבוצות: <b>${totalGroupMembers.toLocaleString()}</b>\n` +
       `👤 סה״כ משתמשים בפרטי: <b>${totalPrivate.toLocaleString()}</b>\n` +
       `🌐 סה״כ חשיפה משוערת: <b>${combined.toLocaleString()}</b>\n\n` +
@@ -644,34 +646,43 @@ async function handleAdminCallback(cq: any, data: string) {
           }
         }),
       );
-      const totalGroupMembers = counts.reduce((sum, g) => sum + g.count, 0);
+      // Bot was removed from unreachable groups → auto-mark inactive so they
+      // disappear from stats on the next call.
+      const unreachable = counts.filter((g) => !g.ok);
+      if (unreachable.length) {
+        await Promise.all(unreachable.map((g) => markGroupInactive(g.chat_id).catch(() => {})));
+      }
+      const active = counts.filter((g) => g.ok).sort((a, b) => b.count - a.count);
+      const totalGroupMembers = active.reduce((sum, g) => sum + g.count, 0);
+      const activeGroupsCount = active.length;
       const combinedReach = totalGroupMembers + s.users;
-      const groupLines = counts.length
-        ? counts
-            .sort((a, b) => b.count - a.count)
-            .slice(0, 60)
-            .map((g) => {
+      const shown = active.slice(0, 60);
+      const groupLines = shown.length
+        ? shown
+            .map((g, i) => {
               const name = escapeHtml(g.title || String(g.chat_id));
-              return g.ok
-                ? `• <b>${name}</b> — ${g.count.toLocaleString()} משתמשים`
-                : `• <b>${name}</b> — <i>לא זמין</i>`;
+              return `${i + 1}. <b>${name}</b> — ${g.count.toLocaleString()} משתמשים`;
             })
             .join("\n")
         : "<i>אין קבוצות פעילות.</i>";
-      const moreNote = counts.length > 60 ? `\n<i>...ועוד ${counts.length - 60} קבוצות</i>` : "";
+      const moreNote = active.length > 60 ? `\n<i>...ועוד ${active.length - 60} קבוצות</i>` : "";
       const text =
         `📊 <b>סטטיסטיקות מפורטות</b>\n\n` +
         `🎬 סרטים: <b>${s.movies.toLocaleString()}</b>\n` +
         `👤 משתמשים בפרטי: <b>${s.users.toLocaleString()}</b>\n` +
-        `👥 קבוצות פעילות: <b>${s.groups.toLocaleString()}</b>\n` +
+        `👥 קבוצות פעילות: <b>${activeGroupsCount.toLocaleString()}</b>\n` +
         `👨‍👩‍👧 סה״כ משתמשים בקבוצות: <b>${totalGroupMembers.toLocaleString()}</b>\n` +
         `🌐 סה״כ קהל (פרטי + קבוצות): <b>${combinedReach.toLocaleString()}</b>\n` +
         `⭐ סה״כ כוכבים שתרמו: <b>${s.totalStars.toLocaleString()}</b>\n\n` +
-        `<b>רשימת קבוצות:</b>\n${groupLines}${moreNote}`;
+        `<b>רשימת קבוצות (לחץ לקבלת קישור הזמנה):</b>\n${groupLines}${moreNote}`;
       // Telegram message hard limit is 4096 chars; trim from the middle if needed.
       const safe = text.length > 3900 ? text.slice(0, 3900) + "\n<i>...נחתך</i>" : text;
+      const groupButtons = shown.map((g) => [{
+        text: `📨 ${truncateBtn(g.title || String(g.chat_id), 45)}`,
+        callback_data: `admin_grp_${g.chat_id}`,
+      }]);
       return await editMessageText(chatId, messageId, safe, {
-        reply_markup: { inline_keyboard: [[{ text: "« חזרה", callback_data: "admin_open" }]] },
+        reply_markup: { inline_keyboard: [...groupButtons, [{ text: "« חזרה", callback_data: "admin_open" }]] },
       }).catch(() => {});
     }
     case "admin_sources": {
@@ -751,6 +762,64 @@ async function handleAdminCallback(cq: any, data: string) {
           "שלח /cancel לביטול.",
       );
   }
+  if (data === "admin_users") {
+    return await renderUsersList(chatId, messageId, "");
+  }
+  if (data === "admin_users_search") {
+    await setAdminState(userId, "awaiting_user_search");
+    return await sendMessage(
+      chatId,
+      "🔎 שלח שם משתמש (עם או בלי @), שם פרטי/משפחה, או ID לחיפוש.\nשלח /cancel לביטול.",
+    );
+  }
+  if (data.startsWith("admin_user_")) {
+    const tid = Number(data.slice("admin_user_".length));
+    if (Number.isFinite(tid)) return await renderUserView(chatId, messageId, tid);
+  }
+  if (data.startsWith("admin_ublk_")) {
+    const tid = Number(data.slice("admin_ublk_".length));
+    if (Number.isFinite(tid)) {
+      await markUserBlocked(tid).catch(() => {});
+      return await renderUserView(chatId, messageId, tid);
+    }
+  }
+  if (data.startsWith("admin_uunblk_")) {
+    const tid = Number(data.slice("admin_uunblk_".length));
+    if (Number.isFinite(tid)) {
+      await unmarkUserBlocked(tid).catch(() => {});
+      return await renderUserView(chatId, messageId, tid);
+    }
+  }
+  if (data.startsWith("admin_grp_")) {
+    const cid = Number(data.slice("admin_grp_".length));
+    if (!Number.isFinite(cid)) return;
+    try {
+      let link: string | null = null;
+      try {
+        const inv: any = await tg("createChatInviteLink", { chat_id: cid, creates_join_request: false });
+        link = inv?.invite_link || null;
+      } catch {
+        try {
+          link = (await tg<string>("exportChatInviteLink", { chat_id: cid })) as any;
+        } catch {}
+      }
+      const info: any = await getChat(cid).catch(() => null);
+      const title = escapeHtml(info?.title || String(cid));
+      if (link) {
+        await sendMessage(
+          chatId,
+          `🔗 <b>${title}</b>\nקישור הזמנה: ${link}`,
+          { reply_markup: { inline_keyboard: [[{ text: "➡️ פתח את הקבוצה", url: link }]] } },
+        );
+      } else {
+        await sendMessage(chatId, `❌ לא הצלחתי ליצור קישור עבור <b>${title}</b>. ודא שהבוט אדמין עם הרשאת הזמנת משתמשים.`);
+      }
+    } catch (e: any) {
+      await sendMessage(chatId, `❌ שגיאה: ${escapeHtml(e?.description || e?.message || "")}`);
+    }
+    return;
+  }
+
   if (data.startsWith("admin_src_rm_")) {
     const cid = Number(data.slice("admin_src_rm_".length));
     await removeSourceChannel(cid);
@@ -874,6 +943,20 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
     return;
   }
 
+  if (st.state === "awaiting_user_search") {
+    await setAdminState(userId, null);
+    const results = await searchBotUsers(text, 30);
+    const header = `👤 <b>תוצאות חיפוש משתמשים</b>\n"<code>${escapeHtml(text)}</code>" · ${results.length} תוצאות`;
+    const body = results.length ? "לחץ על משתמש כדי לראות פרטים ולחסום/לבטל חסימה." : "<i>לא נמצאו משתמשים.</i>";
+    const kb: any[][] = results.map((u) => [
+      { text: `${u.is_blocked ? "🚫 " : ""}${truncateBtn(displayUserName(u), 40)} · ${u.telegram_id}`, callback_data: `admin_user_${u.telegram_id}` },
+    ]);
+    kb.push([{ text: "🔎 חיפוש נוסף", callback_data: "admin_users_search" }]);
+    kb.push([{ text: "« חזרה", callback_data: "admin_open" }]);
+    await sendMessage(chatId, `${header}\n\n${body}`, { reply_markup: { inline_keyboard: kb } });
+    return;
+  }
+
   if (st.state === "awaiting_broadcast") {
     const target = st.data?.target as "private" | "groups" | "all";
     await setAdminState(userId, null);
@@ -962,6 +1045,69 @@ async function handlePreCheckout(q: any) {
 // ───── Utils ─────
 function escapeHtml(s: string) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function truncateBtn(s: string, n: number) {
+  const chars = Array.from(s);
+  return chars.length > n ? chars.slice(0, n - 1).join("") + "…" : s;
+}
+
+function displayUserName(u: BotUserRow): string {
+  const full = [u.first_name, u.last_name].filter(Boolean).join(" ").trim();
+  if (u.username) return `@${u.username}`;
+  if (full) return full;
+  return String(u.telegram_id);
+}
+
+async function renderUsersList(chatId: number, messageId: number, query: string) {
+  const results = await searchBotUsers(query, 30);
+  const header = query
+    ? `👤 <b>תוצאות חיפוש משתמשים</b>\n"<code>${escapeHtml(query)}</code>" · ${results.length} תוצאות`
+    : `👤 <b>משתמשי הבוט</b> · ${results.length} אחרונים`;
+  const body = results.length
+    ? "לחץ על משתמש כדי לראות פרטים ולחסום/לבטל חסימה."
+    : "<i>לא נמצאו משתמשים.</i>";
+  const kb: any[][] = results.map((u) => [
+    {
+      text: `${u.is_blocked ? "🚫 " : ""}${truncateBtn(displayUserName(u), 40)} · ${u.telegram_id}`,
+      callback_data: `admin_user_${u.telegram_id}`,
+    },
+  ]);
+  kb.push([{ text: "🔎 חיפוש", callback_data: "admin_users_search" }]);
+  kb.push([{ text: "🔄 רענן", callback_data: "admin_users" }, { text: "« חזרה", callback_data: "admin_open" }]);
+  await editMessageText(chatId, messageId, `${header}\n\n${body}`, { reply_markup: { inline_keyboard: kb } }).catch(() => {});
+}
+
+async function renderUserView(chatId: number, messageId: number, telegramId: number) {
+  const u = await getBotUser(telegramId);
+  if (!u) {
+    await editMessageText(chatId, messageId, "❌ המשתמש לא נמצא במאגר.", {
+      reply_markup: { inline_keyboard: [[{ text: "« חזרה", callback_data: "admin_users" }]] },
+    }).catch(() => {});
+    return;
+  }
+  const stars = await userStars(telegramId).catch(() => 0);
+  const name = escapeHtml(displayUserName(u));
+  const full = [u.first_name, u.last_name].filter(Boolean).join(" ").trim();
+  const text =
+    `👤 <b>${name}</b>\n\n` +
+    `🆔 ID: <code>${u.telegram_id}</code>\n` +
+    (u.username ? `📛 שם משתמש: @${escapeHtml(u.username)}\n` : "") +
+    (full ? `🧾 שם מלא: ${escapeHtml(full)}\n` : "") +
+    `📅 הצטרף: ${new Date(u.first_seen).toLocaleString("he-IL")}\n` +
+    `🕓 נראה לאחרונה: ${new Date(u.last_seen).toLocaleString("he-IL")}\n` +
+    `⭐ תרומות בכוכבים: <b>${stars.toLocaleString()}</b>\n` +
+    `סטטוס: ${u.is_blocked ? "🚫 חסום" : "✅ פעיל"}`;
+  const actionBtn = u.is_blocked
+    ? { text: "✅ בטל חסימה", callback_data: `admin_uunblk_${u.telegram_id}` }
+    : { text: "🚫 חסום משתמש", callback_data: `admin_ublk_${u.telegram_id}` };
+  await editMessageText(chatId, messageId, text, {
+    reply_markup: {
+      inline_keyboard: [
+        [actionBtn],
+        [{ text: "« חזרה לרשימה", callback_data: "admin_users" }],
+      ],
+    },
+  }).catch(() => {});
 }
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));

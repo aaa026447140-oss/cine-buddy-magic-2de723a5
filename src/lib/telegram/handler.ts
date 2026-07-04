@@ -919,23 +919,6 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
 
   if (st.state === "awaiting_search_group") {
     await setAdminState(userId, null);
-    if (false) { /* keep */ }
-    // fallthrough to original logic below
-  }
-  if (st.state === "awaiting_user_search") {
-    await setAdminState(userId, null);
-    const results = await searchBotUsers(text, 30);
-    const header = `👤 <b>תוצאות חיפוש משתמשים</b>\n"<code>${escapeHtml(text)}</code>" · ${results.length} תוצאות`;
-    const body = results.length ? "לחץ על משתמש כדי לראות פרטים ולחסום/לבטל חסימה." : "<i>לא נמצאו משתמשים.</i>";
-    const kb: any[][] = results.map((u) => [
-      { text: `${u.is_blocked ? "🚫 " : ""}${truncateBtn(displayUserName(u), 40)} · ${u.telegram_id}`, callback_data: `admin_user_${u.telegram_id}` },
-    ]);
-    kb.push([{ text: "🔎 חיפוש נוסף", callback_data: "admin_users_search" }]);
-    kb.push([{ text: "« חזרה", callback_data: "admin_open" }]);
-    await sendMessage(chatId, `${header}\n\n${body}`, { reply_markup: { inline_keyboard: kb } });
-    return;
-  }
-  if (st.state === "awaiting_search_group_dup_noop") {
     if (/^מחק$/i.test(text) || /^remove$/i.test(text) || /^clear$/i.test(text)) {
       await updateSettings({ search_group_url: null, search_group_title: null });
       await sendMessage(chatId, "✅ כפתור קבוצת החיפוש הוסר.");
@@ -957,6 +940,20 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
       chatId,
       `✅ נקבעה קבוצת חיפוש: <b>${escapeHtml(customTitle || url)}</b>\n\nעכשיו יופיע כפתור בתפריט הראשי לכל המשתמשים.`,
     );
+    return;
+  }
+
+  if (st.state === "awaiting_user_search") {
+    await setAdminState(userId, null);
+    const results = await searchBotUsers(text, 30);
+    const header = `👤 <b>תוצאות חיפוש משתמשים</b>\n"<code>${escapeHtml(text)}</code>" · ${results.length} תוצאות`;
+    const body = results.length ? "לחץ על משתמש כדי לראות פרטים ולחסום/לבטל חסימה." : "<i>לא נמצאו משתמשים.</i>";
+    const kb: any[][] = results.map((u) => [
+      { text: `${u.is_blocked ? "🚫 " : ""}${truncateBtn(displayUserName(u), 40)} · ${u.telegram_id}`, callback_data: `admin_user_${u.telegram_id}` },
+    ]);
+    kb.push([{ text: "🔎 חיפוש נוסף", callback_data: "admin_users_search" }]);
+    kb.push([{ text: "« חזרה", callback_data: "admin_open" }]);
+    await sendMessage(chatId, `${header}\n\n${body}`, { reply_markup: { inline_keyboard: kb } });
     return;
   }
 

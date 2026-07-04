@@ -974,6 +974,69 @@ async function handlePreCheckout(q: any) {
 function escapeHtml(s: string) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
+function truncateBtn(s: string, n: number) {
+  const chars = Array.from(s);
+  return chars.length > n ? chars.slice(0, n - 1).join("") + "…" : s;
+}
+
+function displayUserName(u: BotUserRow): string {
+  const full = [u.first_name, u.last_name].filter(Boolean).join(" ").trim();
+  if (u.username) return `@${u.username}`;
+  if (full) return full;
+  return String(u.telegram_id);
+}
+
+async function renderUsersList(chatId: number, messageId: number, query: string) {
+  const results = await searchBotUsers(query, 30);
+  const header = query
+    ? `👤 <b>תוצאות חיפוש משתמשים</b>\n"<code>${escapeHtml(query)}</code>" · ${results.length} תוצאות`
+    : `👤 <b>משתמשי הבוט</b> · ${results.length} אחרונים`;
+  const body = results.length
+    ? "לחץ על משתמש כדי לראות פרטים ולחסום/לבטל חסימה."
+    : "<i>לא נמצאו משתמשים.</i>";
+  const kb: any[][] = results.map((u) => [
+    {
+      text: `${u.is_blocked ? "🚫 " : ""}${truncateBtn(displayUserName(u), 40)} · ${u.telegram_id}`,
+      callback_data: `admin_user_${u.telegram_id}`,
+    },
+  ]);
+  kb.push([{ text: "🔎 חיפוש", callback_data: "admin_users_search" }]);
+  kb.push([{ text: "🔄 רענן", callback_data: "admin_users" }, { text: "« חזרה", callback_data: "admin_open" }]);
+  await editMessageText(chatId, messageId, `${header}\n\n${body}`, { reply_markup: { inline_keyboard: kb } }).catch(() => {});
+}
+
+async function renderUserView(chatId: number, messageId: number, telegramId: number) {
+  const u = await getBotUser(telegramId);
+  if (!u) {
+    await editMessageText(chatId, messageId, "❌ המשתמש לא נמצא במאגר.", {
+      reply_markup: { inline_keyboard: [[{ text: "« חזרה", callback_data: "admin_users" }]] },
+    }).catch(() => {});
+    return;
+  }
+  const stars = await userStars(telegramId).catch(() => 0);
+  const name = escapeHtml(displayUserName(u));
+  const full = [u.first_name, u.last_name].filter(Boolean).join(" ").trim();
+  const text =
+    `👤 <b>${name}</b>\n\n` +
+    `🆔 ID: <code>${u.telegram_id}</code>\n` +
+    (u.username ? `📛 שם משתמש: @${escapeHtml(u.username)}\n` : "") +
+    (full ? `🧾 שם מלא: ${escapeHtml(full)}\n` : "") +
+    `📅 הצטרף: ${new Date(u.first_seen).toLocaleString("he-IL")}\n` +
+    `🕓 נראה לאחרונה: ${new Date(u.last_seen).toLocaleString("he-IL")}\n` +
+    `⭐ תרומות בכוכבים: <b>${stars.toLocaleString()}</b>\n` +
+    `סטטוס: ${u.is_blocked ? "🚫 חסום" : "✅ פעיל"}`;
+  const actionBtn = u.is_blocked
+    ? { text: "✅ בטל חסימה", callback_data: `admin_uunblk_${u.telegram_id}` }
+    : { text: "🚫 חסום משתמש", callback_data: `admin_ublk_${u.telegram_id}` };
+  await editMessageText(chatId, messageId, text, {
+    reply_markup: {
+      inline_keyboard: [
+        [actionBtn],
+        [{ text: "« חזרה לרשימה", callback_data: "admin_users" }],
+      ],
+    },
+  }).catch(() => {});
+}
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }

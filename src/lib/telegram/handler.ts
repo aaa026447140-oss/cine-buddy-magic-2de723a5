@@ -763,6 +763,68 @@ async function handleAdminCallback(cq: any, data: string) {
       );
   }
   if (data.startsWith("admin_src_rm_")) {
+    // handled below
+  }
+
+  if (data === "admin_users") {
+    return await renderUsersList(chatId, messageId, "");
+  }
+  if (data === "admin_users_search") {
+    await setAdminState(userId, "awaiting_user_search");
+    return await sendMessage(
+      chatId,
+      "🔎 שלח שם משתמש (עם או בלי @), שם פרטי/משפחה, או ID לחיפוש.\nשלח /cancel לביטול.",
+    );
+  }
+  if (data.startsWith("admin_user_")) {
+    const tid = Number(data.slice("admin_user_".length));
+    if (Number.isFinite(tid)) return await renderUserView(chatId, messageId, tid);
+  }
+  if (data.startsWith("admin_ublk_")) {
+    const tid = Number(data.slice("admin_ublk_".length));
+    if (Number.isFinite(tid)) {
+      await markUserBlocked(tid).catch(() => {});
+      return await renderUserView(chatId, messageId, tid);
+    }
+  }
+  if (data.startsWith("admin_uunblk_")) {
+    const tid = Number(data.slice("admin_uunblk_".length));
+    if (Number.isFinite(tid)) {
+      await unmarkUserBlocked(tid).catch(() => {});
+      return await renderUserView(chatId, messageId, tid);
+    }
+  }
+  if (data.startsWith("admin_grp_")) {
+    const cid = Number(data.slice("admin_grp_".length));
+    if (!Number.isFinite(cid)) return;
+    try {
+      let link: string | null = null;
+      try {
+        const inv: any = await tg("createChatInviteLink", { chat_id: cid, creates_join_request: false });
+        link = inv?.invite_link || null;
+      } catch {
+        try {
+          link = (await tg<string>("exportChatInviteLink", { chat_id: cid })) as any;
+        } catch {}
+      }
+      const info: any = await getChat(cid).catch(() => null);
+      const title = escapeHtml(info?.title || String(cid));
+      if (link) {
+        await sendMessage(
+          chatId,
+          `🔗 <b>${title}</b>\nקישור הזמנה: ${link}`,
+          { reply_markup: { inline_keyboard: [[{ text: "➡️ פתח את הקבוצה", url: link }]] } },
+        );
+      } else {
+        await sendMessage(chatId, `❌ לא הצלחתי ליצור קישור עבור <b>${title}</b>. ודא שהבוט אדמין עם הרשאת הזמנת משתמשים.`);
+      }
+    } catch (e: any) {
+      await sendMessage(chatId, `❌ שגיאה: ${escapeHtml(e?.description || e?.message || "")}`);
+    }
+    return;
+  }
+
+  if (data.startsWith("admin_src_rm_")) {
     const cid = Number(data.slice("admin_src_rm_".length));
     await removeSourceChannel(cid);
     const list = await listSourceChannels();

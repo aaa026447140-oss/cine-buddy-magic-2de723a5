@@ -20,6 +20,7 @@ import {
   getCachedSearch,
   getCachedSearchAll,
   getAdminState,
+  getBotUser,
   getMovieById,
   getSettings,
   indexMovie,
@@ -32,18 +33,22 @@ import {
   listUsers,
   markGroupInactive,
   markUserBlocked,
+  unmarkUserBlocked,
   recordPayment,
   removeAdmin,
   removeSourceChannel,
   fetchAllSearchCandidates,
   paginateCandidates,
+  searchBotUsers,
   setAdminState,
   setPageState,
   stats,
   updateSettings,
   upsertGroup,
   upsertUser,
+  userStars,
   type BotSettings,
+  type BotUserRow,
 } from "./db";
 import {
   adminPanelKeyboard,
@@ -267,8 +272,8 @@ async function buildStartView(userId: number) {
     `לדוגמה: <code>הארי פוטר</code> או <code>Inception</code>\n\n` +
     `📥 אני אחזיר לך תוצאות מהמאגר. לחץ על השם של הסרט כדי לקבל אותו.\n` +
     `📚 אם יש הרבה תוצאות — אפשר לדפדף בעמודים בעזרת הכפתורים למטה.\n\n` +
-    `💡 ניתן גם להוסיף אותי לקבוצות ולחפש שם.\n\n` +
-    `נבנה על ידי @${settings.builder_username?.replace(/^@/, "") || "Hsshsusudjd"}`;
+    `💡 ניתן גם להוסיף אותי לקבוצות ולחפש שם.`;
+  void settings;
   const kb = startMenuKeyboard(settings, me.username);
   if (await isAdmin(userId)) {
     kb.inline_keyboard.unshift([{ text: "⚙️ לוח אדמין", callback_data: "admin_open" }]);
@@ -463,8 +468,6 @@ async function handleCallback(cq: any) {
     const combined = totalGroupMembers + totalPrivate;
     const text =
       `📢 <b>פרסום ממומן</b>\n\n` +
-      `הבוט שלנו פעיל בעשרות קבוצות ואלפי משתמשים פרטיים —\n` +
-      `הפרסומת שלך תגיע לקהל אמיתי וממוקד.\n\n` +
       `👨‍👩‍👧 סה״כ משתמשים בקבוצות: <b>${totalGroupMembers.toLocaleString()}</b>\n` +
       `👤 סה״כ משתמשים בפרטי: <b>${totalPrivate.toLocaleString()}</b>\n` +
       `🌐 סה״כ חשיפה משוערת: <b>${combined.toLocaleString()}</b>\n\n` +

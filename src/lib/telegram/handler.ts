@@ -183,6 +183,12 @@ async function handleMessage(msg: any) {
       const text = msg.text.trim();
       if (text.startsWith("/")) return; // ignore commands in groups
       if (text.length < 2) return;
+      // Require bot admin+can_invite_users permission in the group before serving results.
+      const perm = await checkGroupPermissions(chat.id).catch(() => ({ ok: true } as any));
+      if (!perm.ok) {
+        await sendMessage(chat.id, perm.text, perm.extra || {}).catch(() => {});
+        return;
+      }
       await safeRunSearchAndRespond(chat.id, from.id, text, 0, null, true);
     }
     return;

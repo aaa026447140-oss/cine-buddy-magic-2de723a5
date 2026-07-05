@@ -1168,6 +1168,32 @@ function queryFromMessageText(text?: string): string | null {
   return q.length >= 2 ? q : null;
 }
 
+// Determine dedupe state from the results message itself so pagination and
+// re-renders keep the user's chosen filter across expired caches.
+function dedupeFromMsg(msg: any, cached: { dedupe?: boolean } | null | undefined): boolean {
+  const kb = msg?.reply_markup?.inline_keyboard as any[][] | undefined;
+  if (Array.isArray(kb)) {
+    for (const row of kb) {
+      for (const btn of row || []) {
+        const cd: string = btn?.callback_data || "";
+        if (typeof cd === "string" && cd.startsWith("dup:")) {
+          const parts = cd.split(":");
+          // dup:<qid>:<newFlag> — newFlag is what the click WOULD set.
+          // So current dedupe is the opposite.
+          const newFlag = parts[2];
+          if (newFlag === "0") return true;  // currently on, click turns off
+          if (newFlag === "1") return false; // currently off, click turns on
+        }
+      }
+    }
+  }
+  const text: string = msg?.text || "";
+  if (text.includes("סינון כפילויות פעיל")) return true;
+  if (text.includes("כולל כפילויות")) return false;
+  if (cached && typeof cached.dedupe === "boolean") return cached.dedupe;
+  return true;
+}
+
 // Short stable id for callback_data (8 hex chars from SHA-1 of query).
 function shortId(s: string): string {
   // Tiny non-crypto hash, no Node 'crypto' dep needed here.

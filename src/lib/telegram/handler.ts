@@ -68,6 +68,37 @@ async function getMe() {
   return _me;
 }
 
+// Check the bot has admin + can_invite_users permission in a group.
+// Returns { ok: true } when permitted; otherwise returns a message tagging
+// the group admin explaining permissions are missing.
+async function checkGroupPermissions(chatId: number): Promise<
+  { ok: true } | { ok: false; text: string; extra?: any }
+> {
+  try {
+    const me = await getMe();
+    const self: any = await getChatMember(chatId, me.id).catch(() => null);
+    const isAdmin = self && (self.status === "administrator" || self.status === "creator");
+    const canInvite = self?.status === "creator" || !!self?.can_invite_users;
+    if (isAdmin && canInvite) return { ok: true };
+    // Find an admin to tag.
+    const admins: any[] = await tg("getChatAdministrators", { chat_id: chatId }).catch(() => []);
+    const target = admins.find((a) => a?.user && !a.user.is_bot && a.status === "creator")
+      || admins.find((a) => a?.user && !a.user.is_bot);
+    let mention = "המנהל";
+    if (target?.user) {
+      const u = target.user;
+      if (u.username) mention = `@${u.username}`;
+      else {
+        const name = escapeHtml(`${u.first_name || ""} ${u.last_name || ""}`.trim() || "מנהל");
+        mention = `<a href="tg://user?id=${u.id}">${name}</a>`;
+      }
+    }
+    return { ok: false, text: `${mention} חסרות לו הרשאות לפעול כמו שצריך` };
+  } catch {
+    return { ok: true };
+  }
+}
+
 function isMainAdmin(userId: number | undefined) {
   return userId === ADMIN_ID;
 }

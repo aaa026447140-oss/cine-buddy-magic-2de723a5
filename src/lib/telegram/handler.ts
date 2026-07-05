@@ -599,7 +599,7 @@ async function handleCallback(cq: any) {
     }
     if (page === pageFromMessageText(msg.text)) return;
     const inGroup = msg.chat.type !== "private";
-    await safeRunSearchAndRespond(chatId, from.id, recovered, page, msg.message_id, inGroup, qid, `${chatId}:${msg.message_id}`, cached?.dedupe !== false);
+    await safeRunSearchAndRespond(chatId, from.id, recovered, page, msg.message_id, inGroup, qid, `${chatId}:${msg.message_id}`, dedupeFromMsg(msg, cached));
     return;
   }
 
@@ -614,7 +614,7 @@ async function handleCallback(cq: any) {
     }
     if (page === pageFromMessageText(msg.text)) return;
     const inGroup = msg.chat.type !== "private";
-    await safeRunSearchAndRespond(chatId, from.id, recovered, page, msg.message_id, inGroup, qid, `${chatId}:${msg.message_id}`, cached?.dedupe !== false);
+    await safeRunSearchAndRespond(chatId, from.id, recovered, page, msg.message_id, inGroup, qid, `${chatId}:${msg.message_id}`, dedupeFromMsg(msg, cached));
     return;
   }
 
@@ -633,7 +633,7 @@ async function handleCallback(cq: any) {
       return;
     }
     const inGroup = msg.chat.type !== "private";
-    await safeRunSearchAndRespond(chatId, from.id, recovered, page, msg.message_id, inGroup, qid, latestScope, cached?.dedupe !== false);
+    await safeRunSearchAndRespond(chatId, from.id, recovered, page, msg.message_id, inGroup, qid, latestScope, dedupeFromMsg(msg, cached));
     return;
   }
 

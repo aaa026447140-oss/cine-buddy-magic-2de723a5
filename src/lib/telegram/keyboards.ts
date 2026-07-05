@@ -58,18 +58,18 @@ export function resultsKeyboard(
   }
   if (totalPages > 1) {
     const nav: any[] = [];
-    if (page > 0) nav.push({ text: "⬅️ הקודם", callback_data: pageCallback(queryId, page - 1) });
+    if (page > 0) nav.push({ text: "⬅️ הקודם", callback_data: pageCallback(queryId, page - 1, dedupe.dedupe) });
     nav.push({ text: `${page + 1}/${totalPages}`, callback_data: "noop" });
-    if (page < totalPages - 1) nav.push({ text: "הבא ➡️", callback_data: pageCallback(queryId, page + 1) });
+    if (page < totalPages - 1) nav.push({ text: "הבא ➡️", callback_data: pageCallback(queryId, page + 1, dedupe.dedupe) });
     rows.push(nav);
   }
   // Duplicate filter toggle
   if (dedupe.dedupe) {
     if (dedupe.hiddenDuplicates > 0) {
-      rows.push([{ text: `🔁 הצג כפילויות (+${dedupe.hiddenDuplicates})`, callback_data: `dup:${queryId}:0` }]);
+      rows.push([{ text: `🔁 הצג כפילויות (+${dedupe.hiddenDuplicates})`, callback_data: `dup:${queryId}:0:${page}` }]);
     }
   } else {
-    rows.push([{ text: `🧹 הפעל סינון כפילויות`, callback_data: `dup:${queryId}:1` }]);
+    rows.push([{ text: `🧹 הפעל סינון כפילויות`, callback_data: `dup:${queryId}:1:${page}` }]);
   }
   rows.push([
     { text: "🤖 הזמנת בוט פרטי", url: INVITE_PRIVATE_BOT_URL },
@@ -155,8 +155,8 @@ function cleanButtonText(value: string) {
   return out.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").replace(/\s+/g, " ").trim() || "ללא שם";
 }
 
-function pageCallback(queryId: string, page: number) {
-  return `nav:${queryId}:${page}`;
+function pageCallback(queryId: string, page: number, dedupe: boolean) {
+  return `nav:${queryId}:${page}:${dedupe ? 1 : 0}`;
 }
 
 // Telegram callback_data max 64 bytes. Encode query as base64url, cap length.

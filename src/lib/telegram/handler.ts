@@ -93,7 +93,7 @@ async function checkGroupPermissions(chatId: number): Promise<
         mention = `<a href="tg://user?id=${u.id}">${name}</a>`;
       }
     }
-    return { ok: false, text: `${mention} חסרות לו הרשאות לפעול כמו שצריך` };
+    return { ok: false, text: `${mention} חסרות לבוט הרשאות לפעול כמו שצריך` };
   } catch {
     return { ok: true };
   }
@@ -467,7 +467,7 @@ async function handleCallback(cq: any) {
   }
 
   if (data.startsWith("dup:")) {
-    const [, qid, flag] = data.split(":");
+    const [, qid, flag, pageText] = data.split(":");
     const cached = await getCachedSearch(qid);
     const recovered = cached?.query || queryFromMessageText(msg.text);
     if (!recovered) {
@@ -477,7 +477,8 @@ async function handleCallback(cq: any) {
     answerCallbackQuery(cq.id).catch(() => {});
     const newDedupe = flag === "1";
     const inGroup = msg.chat.type !== "private";
-    await safeRunSearchAndRespond(chatId, from.id, recovered, 0, msg.message_id, inGroup, undefined, `${chatId}:${msg.message_id}`, newDedupe);
+    const currentPage = pageFromCallbackOrMessage(pageText, msg.text);
+    await safeRunSearchAndRespond(chatId, from.id, recovered, currentPage, msg.message_id, inGroup, qid, `${chatId}:${msg.message_id}`, newDedupe);
     return;
   }
 
@@ -589,7 +590,7 @@ async function handleCallback(cq: any) {
   }
 
   if (data.startsWith("nav:")) {
-    const [, qid, pageText] = data.split(":");
+    const [, qid, pageText, dedupeText] = data.split(":");
     const page = Number(pageText);
     const cached = await getCachedSearch(qid);
     const recovered = cached?.query || queryFromMessageText(msg.text);
@@ -599,7 +600,7 @@ async function handleCallback(cq: any) {
     }
     if (page === pageFromMessageText(msg.text)) return;
     const inGroup = msg.chat.type !== "private";
-    await safeRunSearchAndRespond(chatId, from.id, recovered, page, msg.message_id, inGroup, qid, `${chatId}:${msg.message_id}`, dedupeFromMsg(msg, cached));
+    await safeRunSearchAndRespond(chatId, from.id, recovered, page, msg.message_id, inGroup, qid, `${chatId}:${msg.message_id}`, dedupeFromCallbackOrMsg(dedupeText, msg, cached));
     return;
   }
 
@@ -1156,6 +1157,12 @@ function pageFromMessageText(text?: string): number {
   return Number.isFinite(oneBasedPage) && oneBasedPage > 0 ? oneBasedPage - 1 : 0;
 }
 
+function pageFromCallbackOrMessage(pageText: string | undefined, messageText?: string): number {
+  const page = Number(pageText);
+  if (Number.isInteger(page) && page >= 0) return page;
+  return pageFromMessageText(messageText);
+}
+
 // Recover the original search query from a results message text.
 // The header we render is:
 //   🔎 תוצאות עבור: <QUERY>\nנמצאו ...
@@ -1192,6 +1199,12 @@ function dedupeFromMsg(msg: any, cached: { dedupe?: boolean } | null | undefined
   if (text.includes("כולל כפילויות")) return false;
   if (cached && typeof cached.dedupe === "boolean") return cached.dedupe;
   return true;
+}
+
+function dedupeFromCallbackOrMsg(dedupeText: string | undefined, msg: any, cached: { dedupe?: boolean } | null | undefined): boolean {
+  if (dedupeText === "1") return true;
+  if (dedupeText === "0") return false;
+  return dedupeFromMsg(msg, cached);
 }
 
 // Short stable id for callback_data (8 hex chars from SHA-1 of query).

@@ -214,6 +214,12 @@ async function handleMessage(msg: any) {
       const text = msg.text.trim();
       if (text.startsWith("/")) return; // ignore commands in groups
       if (text.length < 2) return;
+      // Blocked user in a group: silently ignore search attempts, but notify them.
+      const bu = await getBotUser(Number(from.id)).catch(() => null);
+      if (bu?.is_blocked) {
+        await sendMessage(chat.id, "🚫 אתה חסום פנה למנהל", { reply_to_message_id: msg.message_id } as any).catch(() => {});
+        return;
+      }
       // Require bot admin+can_invite_users permission in the group before serving results.
       const perm = await checkGroupPermissions(chat.id).catch(() => ({ ok: true } as any));
       if (!perm.ok) {

@@ -307,12 +307,25 @@ async function handleMessage(msg: any) {
 }
 
 async function buildStatsView() {
-  const s = await stats();
+  const [s, groupList] = await Promise.all([stats(), listGroupsDetailed()]);
+  // Reachability-check each group so counts stay live: if the bot was removed
+  // from a group, mark it inactive and drop it from the public count.
+  const reach = await Promise.all(
+    groupList.map(async (g) => {
+      try { await getChatMemberCount(g.chat_id); return { ok: true, id: g.chat_id }; }
+      catch { return { ok: false, id: g.chat_id }; }
+    }),
+  );
+  const unreachable = reach.filter((r) => !r.ok);
+  if (unreachable.length) {
+    await Promise.all(unreachable.map((r) => markGroupInactive(r.id).catch(() => {})));
+  }
+  const activeGroups = reach.filter((r) => r.ok).length;
   const text =
     `📊 <b>סטטיסטיקת המאגר</b>\n\n` +
     `🎬 סרטים במאגר: <b>${s.movies.toLocaleString()}</b>\n` +
     `👤 משתמשים: <b>${s.users.toLocaleString()}</b>\n` +
-    `👥 קבוצות: <b>${s.groups.toLocaleString()}</b>`;
+    `👥 קבוצות: <b>${activeGroups.toLocaleString()}</b>`;
   const reply_markup = { inline_keyboard: [[{ text: "« חזרה", callback_data: "back_to_start" }]] };
   return { text, reply_markup };
 }

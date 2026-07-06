@@ -93,7 +93,7 @@ async function checkGroupPermissions(chatId: number): Promise<
         mention = `<a href="tg://user?id=${u.id}">${name}</a>`;
       }
     }
-    return { ok: false, text: `${mention} חסרות לבוט הרשאות לפעול כמו שצריך` };
+    return { ok: false, text: `${mention} חסרות לבוט הרשאות כדי לפעול כמו שצריך` };
   } catch {
     return { ok: true };
   }
@@ -214,6 +214,12 @@ async function handleMessage(msg: any) {
       const text = msg.text.trim();
       if (text.startsWith("/")) return; // ignore commands in groups
       if (text.length < 2) return;
+      // Blocked user in a group: silently ignore search attempts, but notify them.
+      const bu = await getBotUser(Number(from.id)).catch(() => null);
+      if (bu?.is_blocked) {
+        await sendMessage(chat.id, "🚫 אתה חסום פנה למנהל", { reply_to_message_id: msg.message_id } as any).catch(() => {});
+        return;
+      }
       // Require bot admin+can_invite_users permission in the group before serving results.
       const perm = await checkGroupPermissions(chat.id).catch(() => ({ ok: true } as any));
       if (!perm.ok) {
@@ -254,8 +260,24 @@ async function handleMessage(msg: any) {
   // Admin multi-step flow
   if (await isAdmin(from.id)) {
     const st = await getAdminState(Number(from.id));
-    if (st && !text.startsWith("/")) {
+    if (st && (text === "/cancel" || !text.startsWith("/"))) {
       return await handleAdminStateInput(chat.id, Number(from.id), st, msg);
+    }
+  }
+
+  // Global /cancel — clear any pending admin state; harmless for regular users.
+  if (text === "/cancel") {
+    await setAdminState(Number(from.id), null).catch(() => {});
+    await sendMessage(chat.id, "❎ בוטל.");
+    return;
+  }
+
+  // Block check for private chats — blocked users cannot search.
+  {
+    const bu = await getBotUser(Number(from.id)).catch(() => null);
+    if (bu?.is_blocked && text && !text.startsWith("/start") && text !== "/stats" && text !== "/admin") {
+      await sendMessage(chat.id, "🚫 אתה חסום פנה למנהל").catch(() => {});
+      return;
     }
   }
 
@@ -285,12 +307,25 @@ async function handleMessage(msg: any) {
 }
 
 async function buildStatsView() {
-  const s = await stats();
+  const [s, groupList] = await Promise.all([stats(), listGroupsDetailed()]);
+  // Reachability-check each group so counts stay live: if the bot was removed
+  // from a group, mark it inactive and drop it from the public count.
+  const reach = await Promise.all(
+    groupList.map(async (g) => {
+      try { await getChatMemberCount(g.chat_id); return { ok: true, id: g.chat_id }; }
+      catch { return { ok: false, id: g.chat_id }; }
+    }),
+  );
+  const unreachable = reach.filter((r) => !r.ok);
+  if (unreachable.length) {
+    await Promise.all(unreachable.map((r) => markGroupInactive(r.id).catch(() => {})));
+  }
+  const activeGroups = reach.filter((r) => r.ok).length;
   const text =
     `📊 <b>סטטיסטיקת המאגר</b>\n\n` +
     `🎬 סרטים במאגר: <b>${s.movies.toLocaleString()}</b>\n` +
     `👤 משתמשים: <b>${s.users.toLocaleString()}</b>\n` +
-    `👥 קבוצות: <b>${s.groups.toLocaleString()}</b>`;
+    `👥 קבוצות: <b>${activeGroups.toLocaleString()}</b>`;
   const reply_markup = { inline_keyboard: [[{ text: "« חזרה", callback_data: "back_to_start" }]] };
   return { text, reply_markup };
 }

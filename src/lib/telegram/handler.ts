@@ -1039,15 +1039,23 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
 
   if (st.state === "awaiting_broadcast") {
     const target = st.data?.target as "private" | "groups" | "all";
-    await setAdminState(userId, null);
-    await sendMessage(chatId, "🚀 מתחיל שידור — זה עשוי לקחת זמן, אל תסגור את הצ׳אט...");
-    // MUST await — in the Worker runtime detached promises are cancelled
-    // when the handler returns, which is why broadcasts never actually went out.
+    // Send the live status message first so we can edit it as progress advances.
+    const status: any = await sendMessage(
+      chatId,
+      `🚀 <b>מתחיל שידור...</b>\nיעד: ${target}`,
+    ).catch(() => null);
+    const statusMsgId: number | null = status?.message_id ?? null;
+    // Mark admin state as "broadcasting" so any incoming text from this
+    // admin (including the broadcast message itself on Telegram retries)
+    // is ignored instead of being treated as a search query.
+    await setAdminState(userId, "broadcasting", { target, status_msg_id: statusMsgId });
     try {
-      await runBroadcast(chatId, userId, target, msg);
+      await runBroadcast(chatId, userId, target, msg, statusMsgId);
     } catch (e: any) {
       console.error("broadcast error:", e?.message || e);
       await sendMessage(chatId, `❌ שגיאה בשידור: ${escapeHtml(e?.message || String(e))}`).catch(() => {});
+    } finally {
+      await setAdminState(userId, null).catch(() => {});
     }
     return;
   }
@@ -1075,7 +1083,13 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
   }
 }
 
-async function runBroadcast(adminChatId: number, adminUserId: number, target: "private" | "groups" | "all", srcMsg: any) {
+async function runBroadcast(
+  adminChatId: number,
+  adminUserId: number,
+  target: "private" | "groups" | "all",
+  srcMsg: any,
+  statusMsgId: number | null,
+) {
   const users = target === "private" || target === "all" ? await listUsers() : [];
   const groups = target === "groups" || target === "all" ? await listGroups() : [];
   const recipients: { id: number; pin: boolean }[] = [
@@ -1086,6 +1100,28 @@ async function runBroadcast(adminChatId: number, adminUserId: number, target: "p
   let failed = 0;
   const fromChatId = srcMsg.chat.id;
   const messageId = srcMsg.message_id;
+  const total = recipients.length;
+  let lastEditAt = 0;
+  let lastEditedText = "";
+
+  const renderStatus = (done: boolean) =>
+    (done ? `✅ <b>שידור הסתיים</b>\n\n` : `📤 <b>שידור בתהליך...</b>\n\n`) +
+    `יעד: ${target}\n` +
+    `סה״כ: <b>${total.toLocaleString()}</b>\n` +
+    `נשלח: <b>${sent.toLocaleString()}</b>\n` +
+    `נכשל: <b>${failed.toLocaleString()}</b>\n` +
+    `התקדמות: <b>${sent + failed}/${total}</b>`;
+
+  const tryEditStatus = async (force: boolean) => {
+    if (!statusMsgId) return;
+    const now = Date.now();
+    if (!force && now - lastEditAt < 1500) return;
+    const text = renderStatus(false);
+    if (text === lastEditedText) return;
+    lastEditAt = now;
+    lastEditedText = text;
+    await editMessageText(adminChatId, statusMsgId, text).catch(() => {});
+  };
 
   for (let i = 0; i < recipients.length; i++) {
     const r = recipients[i];
@@ -1106,15 +1142,16 @@ async function runBroadcast(adminChatId: number, adminUserId: number, target: "p
     }
     // Telegram rate limit: ~30 msg/sec global
     if (i % 25 === 24) await sleep(1000);
-    // Periodic progress
-    if (i % 500 === 499) {
-      await sendMessage(adminChatId, `📤 התקדמות: ${i + 1}/${recipients.length} · נשלח: ${sent} · נכשל: ${failed}`).catch(() => {});
-    }
+    // Live-edit the status message ~every 1.5s
+    await tryEditStatus(false);
   }
-  await sendMessage(
-    adminChatId,
-    `✅ <b>שידור הסתיים</b>\n\nיעד: ${target}\nסה״כ: ${recipients.length}\nנשלח: ${sent}\nנכשל: ${failed}`,
-  );
+  const finalText = renderStatus(true);
+  if (statusMsgId) {
+    const edited = await editMessageText(adminChatId, statusMsgId, finalText).catch(() => null);
+    if (!edited) await sendMessage(adminChatId, finalText).catch(() => {});
+  } else {
+    await sendMessage(adminChatId, finalText).catch(() => {});
+  }
 }
 
 // ───── Payments ─────

@@ -260,6 +260,13 @@ async function handleMessage(msg: any) {
   // Admin multi-step flow
   if (await isAdmin(from.id)) {
     const st = await getAdminState(Number(from.id));
+    // While a broadcast is running for this admin, ignore any incoming
+    // text so the broadcast message itself isn't treated as a search
+    // query (Telegram may retry the same update after 60s). /cancel is
+    // intentionally ignored here to avoid killing an in-flight run.
+    if (st?.state === "broadcasting") {
+      return;
+    }
     if (st && (text === "/cancel" || !text.startsWith("/"))) {
       return await handleAdminStateInput(chat.id, Number(from.id), st, msg);
     }

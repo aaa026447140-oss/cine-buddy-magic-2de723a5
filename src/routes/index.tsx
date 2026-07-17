@@ -5,7 +5,7 @@ export const Route = createFileRoute("/")({
     meta: [
       { title: "Movie Search Bot · Telegram" },
       { name: "description", content: "Webhook endpoint for the Telegram movie search bot." },
-      { property: "og:title", content: "Movie Search Bot" },
+      { property: "og:title", content: "Movie Search Bot · Telegram" },
       { property: "og:description", content: "Webhook endpoint for the Telegram movie search bot." },
     ],
   }),

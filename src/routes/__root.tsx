@@ -77,14 +77,18 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
-      { name: "description", content: "Lovable Generated Project" },
+      { title: "Movie Search Bot · Telegram" },
+      { name: "description", content: "Webhook endpoint for the Telegram movie search bot." },
       { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "Lovable Generated Project" },
+      { property: "og:title", content: "Movie Search Bot · Telegram" },
+      { property: "og:description", content: "Webhook endpoint for the Telegram movie search bot." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
       { name: "twitter:site", content: "@Lovable" },
+      { name: "twitter:title", content: "Movie Search Bot · Telegram" },
+      { name: "twitter:description", content: "Webhook endpoint for the Telegram movie search bot." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/53c0403b-756f-4ba8-94ba-100da133fad3/id-preview-cd13d0e7--1b8910ad-3ceb-422f-97a5-a8022c487b86.lovable.app-1784048923321.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/53c0403b-756f-4ba8-94ba-100da133fad3/id-preview-cd13d0e7--1b8910ad-3ceb-422f-97a5-a8022c487b86.lovable.app-1784048923321.png" },
     ],
     links: [
       {

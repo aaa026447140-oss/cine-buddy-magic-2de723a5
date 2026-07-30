@@ -15,6 +15,14 @@ import { ADMIN_ID, PAGE_SIZE, STAR_AMOUNTS } from "./constants";
 import {
   addAdmin,
   addSourceChannel,
+  addRequiredChannel,
+  countBroadcastRecipients,
+  createBroadcastJob,
+  listRequiredChannels,
+  listUsersPaged,
+  removeRequiredChannel,
+  MAX_PERMANENT_REQUIRED,
+  MAX_TEMPORARY_REQUIRED,
   cacheQuery,
   cacheSearchAll,
   getCachedSearch,
@@ -50,9 +58,12 @@ import {
   type BotSettings,
   type BotUserRow,
 } from "./db";
+import { processBroadcastTick } from "./broadcast";
 import {
   adminPanelKeyboard,
   adminsListKeyboard,
+  requiredChannelsKeyboard,
+  subscribeChannelsKeyboard,
   resultsKeyboard,
   sourceChannelsKeyboard,
   startMenuKeyboard,
@@ -123,14 +134,46 @@ function extractFile(msg: any) {
   return null;
 }
 
-async function isSubscribed(userId: number, settings: BotSettings): Promise<boolean> {
-  if (!settings.required_channel_id) return true; // no required channel set
-  try {
-    const m: any = await getChatMember(settings.required_channel_id, userId);
-    return ["creator", "administrator", "member", "restricted"].includes(m.status);
-  } catch {
-    return false;
+type RequiredTarget = { chat_id: number; title: string; url: string };
+
+/** Legacy single required channel + the multi list (permanent + live temporary). */
+async function requiredTargets(settings: BotSettings): Promise<RequiredTarget[]> {
+  const list = await listRequiredChannels().catch(() => []);
+  const targets: RequiredTarget[] = list.map((c) => ({
+    chat_id: c.chat_id,
+    title: c.title || c.username || String(c.chat_id),
+    url: c.invite_link || (c.username ? `https://t.me/${c.username}` : ""),
+  }));
+  if (settings.required_channel_id && !targets.some((t) => t.chat_id === Number(settings.required_channel_id))) {
+    targets.unshift({
+      chat_id: Number(settings.required_channel_id),
+      title: settings.required_channel_title || settings.required_channel_username || "ערוץ החובה",
+      url:
+        settings.required_channel_invite_link ||
+        (settings.required_channel_username ? `https://t.me/${settings.required_channel_username}` : ""),
+    });
   }
+  return targets;
+}
+
+async function missingRequiredChannels(userId: number, settings: BotSettings): Promise<RequiredTarget[]> {
+  const targets = await requiredTargets(settings);
+  if (!targets.length) return [];
+  const checks = await Promise.all(
+    targets.map(async (t) => {
+      try {
+        const m: any = await getChatMember(t.chat_id, userId);
+        return ["creator", "administrator", "member", "restricted"].includes(m.status) ? null : t;
+      } catch {
+        return t;
+      }
+    }),
+  );
+  return checks.filter(Boolean) as RequiredTarget[];
+}
+
+async function isSubscribed(userId: number, settings: BotSettings): Promise<boolean> {
+  return (await missingRequiredChannels(userId, settings)).length === 0;
 }
 
 async function requireSubscriptionOrPrompt(
@@ -139,14 +182,13 @@ async function requireSubscriptionOrPrompt(
   settings: BotSettings,
   recheckPayload: string,
 ): Promise<boolean> {
-  if (await isSubscribed(userId, settings)) return true;
-  const inviteUrl =
-    settings.required_channel_invite_link ||
-    (settings.required_channel_username ? `https://t.me/${settings.required_channel_username}` : "");
+  const missing = await missingRequiredChannels(userId, settings);
+  if (!missing.length) return true;
+  const lines = missing.map((m) => `• <b>${escapeHtml(m.title)}</b>`).join("\n");
   await sendMessage(
     chatId,
-    "🔒 כדי להשתמש בבוט עליך להיות מנוי לערוץ החובה שלנו.\n\nהצטרף ולחץ על «הצטרפתי, בדוק שוב».",
-    { reply_markup: subscribeRequiredKeyboard(inviteUrl, recheckPayload) },
+    `🔒 כדי להשתמש בבוט עליך להיות מנוי לערוצי החובה הבאים:\n\n${lines}\n\nהצטרף ולחץ על «הצטרפתי, בדוק שוב».`,
+    { reply_markup: subscribeChannelsKeyboard(missing, recheckPayload) },
   );
   return false;
 }
@@ -260,23 +302,10 @@ async function handleMessage(msg: any) {
   // Admin multi-step flow
   if (await isAdmin(from.id)) {
     const st = await getAdminState(Number(from.id));
-    // While a broadcast is running for this admin, ignore any incoming
-    // text so the broadcast message itself isn't treated as a search
-    // query (Telegram may retry the same update after 60s). /cancel is
-    // intentionally ignored here to avoid killing an in-flight run.
+    // Legacy leftover state from the old in-request broadcast: never lock the
+    // admin out — broadcasts now run as resumable background jobs.
     if (st?.state === "broadcasting") {
-      // Safety valve: if the worker died mid-broadcast the state would stay
-      // forever and the bot would look "dead" for that admin. Consider the
-      // state stale when no heartbeat arrived for 90s, or on explicit /cancel.
-      const hb = Number(st.data?.heartbeat_at ?? st.data?.started_at ?? 0);
-      const stale = !hb || Date.now() - hb > 90_000;
-      if (text === "/cancel" || stale) {
-        await setAdminState(Number(from.id), null).catch(() => {});
-        await sendMessage(chat.id, stale && text !== "/cancel"
-          ? "⚠️ שידור קודם נתקע ואופס. אפשר להמשיך כרגיל."
-          : "❎ מצב השידור בוטל.").catch(() => {});
-        return;
-      }
+      await setAdminState(Number(from.id), null).catch(() => {});
       return;
     }
     if (st && (text === "/cancel" || !text.startsWith("/"))) {
@@ -710,7 +739,15 @@ async function handleAdminCallback(cq: any, data: string) {
   await answerCallbackQuery(cq.id);
 
   // Main-admin-only actions
-  if (!main && (data === "admin_set_required" || data === "admin_manage" || data === "admin_add" || data.startsWith("admin_rm_"))) {
+  if (
+    !main &&
+    (data === "admin_set_required" ||
+      data === "admin_required" ||
+      data.startsWith("admin_req_") ||
+      data === "admin_manage" ||
+      data === "admin_add" ||
+      data.startsWith("admin_rm_"))
+  ) {
     return;
   }
 
@@ -807,6 +844,22 @@ async function handleAdminCallback(cq: any, data: string) {
           "ודא שהבוט הוסף לערוץ <b>כאדמין</b>.\n\n" +
           "שלח /cancel לביטול.",
       );
+    case "admin_required":
+      return await renderRequiredChannels(chatId, messageId);
+    case "admin_req_add_perm":
+      await setAdminState(userId, "awaiting_required_add", { kind: "permanent" });
+      return await sendMessage(
+        chatId,
+        "📌 שלח את <b>שם המשתמש</b> או <b>ה-ID</b> של ערוץ חובה <b>קבוע</b>.\n" +
+          "דוגמה: <code>@my_channel</code>\nהבוט חייב להיות אדמין בערוץ.\n\nשלח /cancel לביטול.",
+      );
+    case "admin_req_add_temp":
+      await setAdminState(userId, "awaiting_required_add", { kind: "temporary" });
+      return await sendMessage(
+        chatId,
+        "⏳ שלח ערוץ חובה <b>זמני</b> ומספר ימים, בפורמט:\n\n" +
+          "<code>@my_channel 7</code> — חובה למשך 7 ימים\n\nהבוט חייב להיות אדמין בערוץ.\n\nשלח /cancel לביטול.",
+      );
     case "admin_set_search_group":
       await setAdminState(userId, "awaiting_search_group");
       return await sendMessage(
@@ -855,7 +908,32 @@ async function handleAdminCallback(cq: any, data: string) {
       );
   }
   if (data === "admin_users") {
-    return await renderUsersList(chatId, messageId, "");
+    return await renderUsersList(chatId, messageId, { query: "", page: 0, sort: "recent", blockedOnly: false });
+  }
+  if (data.startsWith("admin_ul:")) {
+    const [, sort, pageText, blockedText] = data.split(":");
+    return await renderUsersList(chatId, messageId, {
+      query: "",
+      page: Math.max(0, Number(pageText) || 0),
+      sort: sort === "joined" ? "joined" : "recent",
+      blockedOnly: blockedText === "1",
+    });
+  }
+  if (data.startsWith("admin_req_rm_")) {
+    const cid = Number(data.slice("admin_req_rm_".length));
+    if (Number.isFinite(cid)) {
+      await removeRequiredChannel(cid).catch(() => {});
+      const settings = await getSettings();
+      if (Number(settings.required_channel_id || 0) === cid) {
+        await updateSettings({
+          required_channel_id: null,
+          required_channel_username: null,
+          required_channel_title: null,
+          required_channel_invite_link: null,
+        }).catch(() => {});
+      }
+    }
+    return await renderRequiredChannels(chatId, messageId);
   }
   if (data === "admin_users_search") {
     await setAdminState(userId, "awaiting_user_search");
@@ -1009,6 +1087,61 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
     return;
   }
 
+  if (st.state === "awaiting_required_add") {
+    const kind: "permanent" | "temporary" = st.data?.kind === "temporary" ? "temporary" : "permanent";
+    const parts = text.split(/\s+/);
+    const ref = parts[0] || "";
+    const days = Number(parts[1] ?? "0");
+    if (kind === "temporary" && (!Number.isFinite(days) || days <= 0)) {
+      await sendMessage(chatId, "❌ חסר מספר ימים. דוגמה: <code>@my_channel 7</code>. או /cancel לביטול.");
+      return;
+    }
+    const existing = await listRequiredChannels();
+    const count = existing.filter((c) => (c.kind === "temporary") === (kind === "temporary")).length;
+    const max = kind === "temporary" ? MAX_TEMPORARY_REQUIRED : MAX_PERMANENT_REQUIRED;
+    if (count >= max) {
+      await setAdminState(userId, null);
+      await sendMessage(chatId, `❌ הגעת למקסימום (${max}) ערוצי חובה מסוג זה. הסר ערוץ קיים תחילה.`);
+      return;
+    }
+    const chatRef = ref.startsWith("@") || ref.startsWith("-") || /^\d+$/.test(ref) ? ref : `@${ref}`;
+    try {
+      const ch: any = await getChat(chatRef);
+      const me = await getMe();
+      const mem: any = await getChatMember(ch.id, me.id).catch(() => null);
+      if (!mem || !["administrator", "creator"].includes(mem.status)) {
+        await sendMessage(chatId, "❌ הבוט לא אדמין בערוץ הזה. הוסף אותו כאדמין ונסה שוב.");
+        return;
+      }
+      let invite = ch.invite_link as string | null;
+      if (!invite && !ch.username) {
+        try {
+          const link: any = await tg("createChatInviteLink", { chat_id: ch.id });
+          invite = link.invite_link;
+        } catch {}
+      }
+      const expires_at = kind === "temporary" ? new Date(Date.now() + days * 86400_000).toISOString() : null;
+      await addRequiredChannel({
+        chat_id: Number(ch.id),
+        username: ch.username || null,
+        title: ch.title || null,
+        invite_link: invite || (ch.username ? `https://t.me/${ch.username}` : null),
+        kind,
+        expires_at,
+        added_by: userId,
+      });
+      await setAdminState(userId, null);
+      await sendMessage(
+        chatId,
+        `✅ ערוץ חובה ${kind === "temporary" ? `<b>זמני</b> (${days} ימים)` : "<b>קבוע</b>"} נוסף: ` +
+          `<b>${escapeHtml(ch.title || ch.username || String(ch.id))}</b>`,
+      );
+    } catch (e: any) {
+      await sendMessage(chatId, `❌ לא הצלחתי לאמת את הערוץ.\n${escapeHtml(e?.description || e?.message || "")}`);
+    }
+    return;
+  }
+
   if (st.state === "awaiting_search_group") {
     await setAdminState(userId, null);
     if (/^מחק$/i.test(text) || /^remove$/i.test(text) || /^clear$/i.test(text)) {
@@ -1051,28 +1184,29 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
 
   if (st.state === "awaiting_broadcast") {
     const target = st.data?.target as "private" | "groups" | "all";
-    // Send the live status message first so we can edit it as progress advances.
+    // Clear the state immediately so the admin is never locked out.
+    await setAdminState(userId, null).catch(() => {});
+    const total = await countBroadcastRecipients(target).catch(() => 0);
     const status: any = await sendMessage(
       chatId,
-      `🚀 <b>מתחיל שידור...</b>\nיעד: ${target}`,
+      `\ud83d\ude80 <b>\u05de\u05ea\u05d7\u05d9\u05dc \u05e9\u05d9\u05d3\u05d5\u05e8...</b>\n\u05d9\u05e2\u05d3: ${target}\n\u05e1\u05d4\u05f4\u05db \u05e0\u05de\u05e2\u05e0\u05d9\u05dd: <b>${total.toLocaleString()}</b>`,
     ).catch(() => null);
-    const statusMsgId: number | null = status?.message_id ?? null;
-    // Mark admin state as "broadcasting" so any incoming text from this
-    // admin (including the broadcast message itself on Telegram retries)
-    // is ignored instead of being treated as a search query.
-    await setAdminState(userId, "broadcasting", {
-      target,
-      status_msg_id: statusMsgId,
-      started_at: Date.now(),
-      heartbeat_at: Date.now(),
-    });
     try {
-      await runBroadcast(chatId, userId, target, msg, statusMsgId);
+      const job = await createBroadcastJob({
+        admin_user_id: userId,
+        admin_chat_id: chatId,
+        status_msg_id: status?.message_id ?? null,
+        target,
+        from_chat_id: Number(msg.chat.id),
+        message_id: Number(msg.message_id),
+        total,
+      });
+      // Start right away; the cron tick resumes the job until it is complete,
+      // so the broadcast always reaches every recipient.
+      await processBroadcastTick(15_000, job.id);
     } catch (e: any) {
       console.error("broadcast error:", e?.message || e);
-      await sendMessage(chatId, `❌ שגיאה בשידור: ${escapeHtml(e?.message || String(e))}`).catch(() => {});
-    } finally {
-      await setAdminState(userId, null).catch(() => {});
+      await sendMessage(chatId, `\u274c \u05e9\u05d2\u05d9\u05d0\u05d4 \u05d1\u05e9\u05d9\u05d3\u05d5\u05e8: ${escapeHtml(e?.message || String(e))}`).catch(() => {});
     }
     return;
   }
@@ -1100,115 +1234,6 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
   }
 }
 
-async function runBroadcast(
-  adminChatId: number,
-  adminUserId: number,
-  target: "private" | "groups" | "all",
-  srcMsg: any,
-  statusMsgId: number | null,
-) {
-  const users = target === "private" || target === "all" ? await listUsers() : [];
-  const groups = target === "groups" || target === "all" ? await listGroups() : [];
-  const recipients: { id: number; pin: boolean }[] = [
-    ...users.map((id) => ({ id, pin: false })),
-    ...groups.map((id) => ({ id, pin: true })),
-  ];
-  let sent = 0;
-  let failed = 0;
-  const fromChatId = srcMsg.chat.id;
-  const messageId = srcMsg.message_id;
-  const total = recipients.length;
-  let lastEditAt = 0;
-  let lastEditedText = "";
-  let lastHeartbeat = Date.now();
-  let rateLimitWaits = 0;
-  let lastRetryAfter = 0;
-
-  // Telegram flood-control (429) aware sender: waits retry_after and resumes.
-  const withFloodWait = async <T>(fn: () => Promise<T>): Promise<T> => {
-    for (let attempt = 0; attempt < 6; attempt++) {
-      try {
-        return await fn();
-      } catch (e: any) {
-        const retryAfter = Number(e?.parameters?.retry_after ?? 0);
-        if (e?.code === 429 && retryAfter > 0) {
-          rateLimitWaits++;
-          lastRetryAfter = retryAfter;
-          await sendMessage(
-            adminChatId,
-            `⏳ קיבלתי באן זמני מטלגרם (Flood control). ממתין <b>${retryAfter}</b> שניות וממשיך.`,
-          ).catch(() => {});
-          await sleep((retryAfter + 1) * 1000);
-          continue;
-        }
-        throw e;
-      }
-    }
-    throw new Error("flood control: too many retries");
-  };
-
-  const renderStatus = (done: boolean) =>
-    (done ? `✅ <b>שידור הסתיים</b>\n\n` : `📤 <b>שידור בתהליך...</b>\n\n`) +
-    `יעד: ${target}\n` +
-    `סה״כ: <b>${total.toLocaleString()}</b>\n` +
-    `נשלח: <b>${sent.toLocaleString()}</b>\n` +
-    `נכשל: <b>${failed.toLocaleString()}</b>\n` +
-    `התקדמות: <b>${sent + failed}/${total}</b>` +
-    (rateLimitWaits
-      ? `\n⏳ המתנות עקב הגבלת טלגרם: <b>${rateLimitWaits}</b> (אחרונה: ${lastRetryAfter}s)`
-      : "");
-
-  const tryEditStatus = async (force: boolean) => {
-    if (!statusMsgId) return;
-    const now = Date.now();
-    if (!force && now - lastEditAt < 1500) return;
-    const text = renderStatus(false);
-    if (text === lastEditedText) return;
-    lastEditAt = now;
-    lastEditedText = text;
-    await editMessageText(adminChatId, statusMsgId, text).catch(() => {});
-  };
-
-  for (let i = 0; i < recipients.length; i++) {
-    const r = recipients[i];
-    try {
-      const copied: any = await withFloodWait(() => copyMessage(r.id, fromChatId, messageId));
-      sent++;
-      if (r.pin && copied?.message_id) {
-        await pinChatMessage(r.id, copied.message_id, true).catch(() => {});
-      }
-    } catch (e: any) {
-      failed++;
-      const code = e?.code;
-      const desc: string = e?.description || "";
-      if (code === 403 || /blocked|deactivated|kicked|chat not found/i.test(desc)) {
-        if (r.pin) await markGroupInactive(r.id).catch(() => {});
-        else await markUserBlocked(r.id).catch(() => {});
-      }
-    }
-    // Telegram rate limit: ~30 msg/sec global
-    if (i % 25 === 24) await sleep(1000);
-    // Live-edit the status message ~every 1.5s
-    await tryEditStatus(false);
-    // Heartbeat so a crashed run can be detected and never blocks the admin.
-    if (Date.now() - lastHeartbeat > 15_000) {
-      lastHeartbeat = Date.now();
-      await setAdminState(adminUserId, "broadcasting", {
-        target,
-        status_msg_id: statusMsgId,
-        heartbeat_at: lastHeartbeat,
-      }).catch(() => {});
-    }
-  }
-  const finalText = renderStatus(true);
-  if (statusMsgId) {
-    const edited = await editMessageText(adminChatId, statusMsgId, finalText).catch(() => null);
-    if (!edited) await sendMessage(adminChatId, finalText).catch(() => {});
-  } else {
-    await sendMessage(adminChatId, finalText).catch(() => {});
-  }
-}
-
 // ───── Payments ─────
 async function handlePreCheckout(q: any) {
   await answerPreCheckoutQuery(q.id, true).catch((e) => console.error("preCheckout:", e?.message));
@@ -1230,11 +1255,67 @@ function displayUserName(u: BotUserRow): string {
   return String(u.telegram_id);
 }
 
-async function renderUsersList(chatId: number, messageId: number, query: string) {
-  const results = await searchBotUsers(query, 30);
-  const header = query
-    ? `👤 <b>תוצאות חיפוש משתמשים</b>\n"<code>${escapeHtml(query)}</code>" · ${results.length} תוצאות`
-    : `👤 <b>משתמשי הבוט</b> · ${results.length} אחרונים`;
+const USERS_PAGE_SIZE = 15;
+
+async function renderRequiredChannels(chatId: number, messageId: number) {
+  const [list, settings] = await Promise.all([listRequiredChannels(), getSettings()]);
+  const rows = [...list];
+  if (settings.required_channel_id && !rows.some((c) => c.chat_id === Number(settings.required_channel_id))) {
+    rows.unshift({
+      chat_id: Number(settings.required_channel_id),
+      username: settings.required_channel_username,
+      title: settings.required_channel_title,
+      invite_link: settings.required_channel_invite_link,
+      kind: "permanent",
+      expires_at: null,
+    });
+  }
+  const perm = rows.filter((c) => c.kind !== "temporary");
+  const temp = rows.filter((c) => c.kind === "temporary");
+  const fmt = (c: (typeof rows)[number]) =>
+    `• <b>${escapeHtml(c.title || c.username || String(c.chat_id))}</b>` +
+    (c.expires_at ? ` — עד ${new Date(c.expires_at).toLocaleString("he-IL")}` : "");
+  const text =
+    `🔒 <b>ערוצי חובה</b>\n\n` +
+    `📌 <b>קבועים (${perm.length}/${MAX_PERMANENT_REQUIRED})</b>\n${perm.length ? perm.map(fmt).join("\n") : "<i>אין</i>"}\n\n` +
+    `⏳ <b>זמניים (${temp.length}/${MAX_TEMPORARY_REQUIRED})</b>\n${temp.length ? temp.map(fmt).join("\n") : "<i>אין</i>"}\n\n` +
+    `כל משתמש חייב להיות מנוי לכל הערוצים ברשימה. לחיצה על ❌ מסירה ערוץ.`;
+  await editMessageText(chatId, messageId, text, {
+    reply_markup: requiredChannelsKeyboard(
+      rows as any,
+      perm.length < MAX_PERMANENT_REQUIRED,
+      temp.length < MAX_TEMPORARY_REQUIRED,
+    ),
+  }).catch(() => {});
+}
+
+async function renderUsersList(
+  chatId: number,
+  messageId: number,
+  opts: { query: string; page: number; sort: "joined" | "recent"; blockedOnly: boolean },
+) {
+  let results: BotUserRow[];
+  let total: number;
+  let header: string;
+  if (opts.query) {
+    results = await searchBotUsers(opts.query, 30);
+    total = results.length;
+    header = `👤 <b>תוצאות חיפוש משתמשים</b>\n"<code>${escapeHtml(opts.query)}</code>" · ${total} תוצאות`;
+  } else {
+    const res = await listUsersPaged({
+      page: opts.page,
+      pageSize: USERS_PAGE_SIZE,
+      sort: opts.sort,
+      blockedOnly: opts.blockedOnly,
+    });
+    results = res.rows;
+    total = res.total;
+    const sortLabel = opts.sort === "joined" ? "לפי סדר הצטרפות" : "לפי שימוש אחרון";
+    header =
+      (opts.blockedOnly ? `🚫 <b>משתמשים חסומים</b>` : `👤 <b>משתמשי הבוט</b>`) +
+      `\nסה״כ: <b>${total.toLocaleString()}</b> · ${sortLabel}` +
+      `\nעמוד ${opts.page + 1}/${Math.max(1, Math.ceil(total / USERS_PAGE_SIZE))}`;
+  }
   const body = results.length
     ? "לחץ על משתמש כדי לראות פרטים ולחסום/לבטל חסימה."
     : "<i>לא נמצאו משתמשים.</i>";
@@ -1244,8 +1325,26 @@ async function renderUsersList(chatId: number, messageId: number, query: string)
       callback_data: `admin_user_${u.telegram_id}`,
     },
   ]);
+  const b = opts.blockedOnly ? "1" : "0";
+  if (!opts.query) {
+    const totalPages = Math.max(1, Math.ceil(total / USERS_PAGE_SIZE));
+    const nav: any[] = [];
+    if (opts.page > 0) nav.push({ text: "⬅️ הקודם", callback_data: `admin_ul:${opts.sort}:${opts.page - 1}:${b}` });
+    nav.push({ text: `${opts.page + 1}/${totalPages}`, callback_data: "noop" });
+    if (opts.page < totalPages - 1) nav.push({ text: "הבא ➡️", callback_data: `admin_ul:${opts.sort}:${opts.page + 1}:${b}` });
+    if (nav.length > 1) kb.push(nav);
+    kb.push([
+      { text: `${opts.sort === "joined" ? "✅ " : ""}📅 סדר הצטרפות`, callback_data: `admin_ul:joined:0:${b}` },
+      { text: `${opts.sort === "recent" ? "✅ " : ""}🕓 שימוש אחרון`, callback_data: `admin_ul:recent:0:${b}` },
+    ]);
+    kb.push([
+      opts.blockedOnly
+        ? { text: "👤 כל המשתמשים", callback_data: `admin_ul:${opts.sort}:0:0` }
+        : { text: "🚫 משתמשים חסומים", callback_data: `admin_ul:${opts.sort}:0:1` },
+    ]);
+  }
   kb.push([{ text: "🔎 חיפוש", callback_data: "admin_users_search" }]);
-  kb.push([{ text: "🔄 רענן", callback_data: "admin_users" }, { text: "« חזרה", callback_data: "admin_open" }]);
+  kb.push([{ text: "« חזרה", callback_data: "admin_open" }]);
   await editMessageText(chatId, messageId, `${header}\n\n${body}`, { reply_markup: { inline_keyboard: kb } }).catch(() => {});
 }
 

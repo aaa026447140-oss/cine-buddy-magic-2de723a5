@@ -194,6 +194,69 @@ export type Database = {
         }
         Relationships: []
       }
+      broadcast_jobs: {
+        Row: {
+          admin_chat_id: number
+          admin_user_id: number
+          created_at: string
+          cursor_id: number
+          failed: number
+          from_chat_id: number
+          id: number
+          last_error: string | null
+          locked_at: string | null
+          message_id: number
+          phase: string
+          resume_after: string
+          sent: number
+          status: string
+          status_msg_id: number | null
+          target: string
+          total: number
+          updated_at: string
+        }
+        Insert: {
+          admin_chat_id: number
+          admin_user_id: number
+          created_at?: string
+          cursor_id?: number
+          failed?: number
+          from_chat_id: number
+          id?: number
+          last_error?: string | null
+          locked_at?: string | null
+          message_id: number
+          phase?: string
+          resume_after?: string
+          sent?: number
+          status?: string
+          status_msg_id?: number | null
+          target: string
+          total?: number
+          updated_at?: string
+        }
+        Update: {
+          admin_chat_id?: number
+          admin_user_id?: number
+          created_at?: string
+          cursor_id?: number
+          failed?: number
+          from_chat_id?: number
+          id?: number
+          last_error?: string | null
+          locked_at?: string | null
+          message_id?: number
+          phase?: string
+          resume_after?: string
+          sent?: number
+          status?: string
+          status_msg_id?: number | null
+          target?: string
+          total?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       broadcast_log: {
         Row: {
           created_at: string
@@ -278,6 +341,39 @@ export type Database = {
           created_at?: string
           id?: string
           query?: string
+        }
+        Relationships: []
+      }
+      required_channels: {
+        Row: {
+          added_by: number | null
+          chat_id: number
+          created_at: string
+          expires_at: string | null
+          invite_link: string | null
+          kind: string
+          title: string | null
+          username: string | null
+        }
+        Insert: {
+          added_by?: number | null
+          chat_id: number
+          created_at?: string
+          expires_at?: string | null
+          invite_link?: string | null
+          kind?: string
+          title?: string | null
+          username?: string | null
+        }
+        Update: {
+          added_by?: number | null
+          chat_id?: number
+          created_at?: string
+          expires_at?: string | null
+          invite_link?: string | null
+          kind?: string
+          title?: string | null
+          username?: string | null
         }
         Relationships: []
       }

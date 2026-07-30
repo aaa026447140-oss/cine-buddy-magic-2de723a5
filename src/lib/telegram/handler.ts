@@ -265,6 +265,18 @@ async function handleMessage(msg: any) {
     // query (Telegram may retry the same update after 60s). /cancel is
     // intentionally ignored here to avoid killing an in-flight run.
     if (st?.state === "broadcasting") {
+      // Safety valve: if the worker died mid-broadcast the state would stay
+      // forever and the bot would look "dead" for that admin. Consider the
+      // state stale when no heartbeat arrived for 90s, or on explicit /cancel.
+      const hb = Number(st.data?.heartbeat_at ?? st.data?.started_at ?? 0);
+      const stale = !hb || Date.now() - hb > 90_000;
+      if (text === "/cancel" || stale) {
+        await setAdminState(Number(from.id), null).catch(() => {});
+        await sendMessage(chat.id, stale && text !== "/cancel"
+          ? "⚠️ שידור קודם נתקע ואופס. אפשר להמשיך כרגיל."
+          : "❎ מצב השידור בוטל.").catch(() => {});
+        return;
+      }
       return;
     }
     if (st && (text === "/cancel" || !text.startsWith("/"))) {
@@ -1048,7 +1060,12 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
     // Mark admin state as "broadcasting" so any incoming text from this
     // admin (including the broadcast message itself on Telegram retries)
     // is ignored instead of being treated as a search query.
-    await setAdminState(userId, "broadcasting", { target, status_msg_id: statusMsgId });
+    await setAdminState(userId, "broadcasting", {
+      target,
+      status_msg_id: statusMsgId,
+      started_at: Date.now(),
+      heartbeat_at: Date.now(),
+    });
     try {
       await runBroadcast(chatId, userId, target, msg, statusMsgId);
     } catch (e: any) {
@@ -1103,6 +1120,32 @@ async function runBroadcast(
   const total = recipients.length;
   let lastEditAt = 0;
   let lastEditedText = "";
+  let lastHeartbeat = Date.now();
+  let rateLimitWaits = 0;
+  let lastRetryAfter = 0;
+
+  // Telegram flood-control (429) aware sender: waits retry_after and resumes.
+  const withFloodWait = async <T>(fn: () => Promise<T>): Promise<T> => {
+    for (let attempt = 0; attempt < 6; attempt++) {
+      try {
+        return await fn();
+      } catch (e: any) {
+        const retryAfter = Number(e?.parameters?.retry_after ?? 0);
+        if (e?.code === 429 && retryAfter > 0) {
+          rateLimitWaits++;
+          lastRetryAfter = retryAfter;
+          await sendMessage(
+            adminChatId,
+            `⏳ קיבלתי באן זמני מטלגרם (Flood control). ממתין <b>${retryAfter}</b> שניות וממשיך.`,
+          ).catch(() => {});
+          await sleep((retryAfter + 1) * 1000);
+          continue;
+        }
+        throw e;
+      }
+    }
+    throw new Error("flood control: too many retries");
+  };
 
   const renderStatus = (done: boolean) =>
     (done ? `✅ <b>שידור הסתיים</b>\n\n` : `📤 <b>שידור בתהליך...</b>\n\n`) +
@@ -1110,7 +1153,10 @@ async function runBroadcast(
     `סה״כ: <b>${total.toLocaleString()}</b>\n` +
     `נשלח: <b>${sent.toLocaleString()}</b>\n` +
     `נכשל: <b>${failed.toLocaleString()}</b>\n` +
-    `התקדמות: <b>${sent + failed}/${total}</b>`;
+    `התקדמות: <b>${sent + failed}/${total}</b>` +
+    (rateLimitWaits
+      ? `\n⏳ המתנות עקב הגבלת טלגרם: <b>${rateLimitWaits}</b> (אחרונה: ${lastRetryAfter}s)`
+      : "");
 
   const tryEditStatus = async (force: boolean) => {
     if (!statusMsgId) return;
@@ -1126,7 +1172,7 @@ async function runBroadcast(
   for (let i = 0; i < recipients.length; i++) {
     const r = recipients[i];
     try {
-      const copied: any = await copyMessage(r.id, fromChatId, messageId);
+      const copied: any = await withFloodWait(() => copyMessage(r.id, fromChatId, messageId));
       sent++;
       if (r.pin && copied?.message_id) {
         await pinChatMessage(r.id, copied.message_id, true).catch(() => {});
@@ -1144,6 +1190,15 @@ async function runBroadcast(
     if (i % 25 === 24) await sleep(1000);
     // Live-edit the status message ~every 1.5s
     await tryEditStatus(false);
+    // Heartbeat so a crashed run can be detected and never blocks the admin.
+    if (Date.now() - lastHeartbeat > 15_000) {
+      lastHeartbeat = Date.now();
+      await setAdminState(adminUserId, "broadcasting", {
+        target,
+        status_msg_id: statusMsgId,
+        heartbeat_at: lastHeartbeat,
+      }).catch(() => {});
+    }
   }
   const finalText = renderStatus(true);
   if (statusMsgId) {

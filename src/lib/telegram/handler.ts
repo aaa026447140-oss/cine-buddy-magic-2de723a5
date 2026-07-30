@@ -1321,11 +1321,67 @@ function displayUserName(u: BotUserRow): string {
   return String(u.telegram_id);
 }
 
-async function renderUsersList(chatId: number, messageId: number, query: string) {
-  const results = await searchBotUsers(query, 30);
-  const header = query
-    ? `👤 <b>תוצאות חיפוש משתמשים</b>\n"<code>${escapeHtml(query)}</code>" · ${results.length} תוצאות`
-    : `👤 <b>משתמשי הבוט</b> · ${results.length} אחרונים`;
+const USERS_PAGE_SIZE = 15;
+
+async function renderRequiredChannels(chatId: number, messageId: number) {
+  const [list, settings] = await Promise.all([listRequiredChannels(), getSettings()]);
+  const rows = [...list];
+  if (settings.required_channel_id && !rows.some((c) => c.chat_id === Number(settings.required_channel_id))) {
+    rows.unshift({
+      chat_id: Number(settings.required_channel_id),
+      username: settings.required_channel_username,
+      title: settings.required_channel_title,
+      invite_link: settings.required_channel_invite_link,
+      kind: "permanent",
+      expires_at: null,
+    });
+  }
+  const perm = rows.filter((c) => c.kind !== "temporary");
+  const temp = rows.filter((c) => c.kind === "temporary");
+  const fmt = (c: (typeof rows)[number]) =>
+    `• <b>${escapeHtml(c.title || c.username || String(c.chat_id))}</b>` +
+    (c.expires_at ? ` — עד ${new Date(c.expires_at).toLocaleString("he-IL")}` : "");
+  const text =
+    `🔒 <b>ערוצי חובה</b>\n\n` +
+    `📌 <b>קבועים (${perm.length}/${MAX_PERMANENT_REQUIRED})</b>\n${perm.length ? perm.map(fmt).join("\n") : "<i>אין</i>"}\n\n` +
+    `⏳ <b>זמניים (${temp.length}/${MAX_TEMPORARY_REQUIRED})</b>\n${temp.length ? temp.map(fmt).join("\n") : "<i>אין</i>"}\n\n` +
+    `כל משתמש חייב להיות מנוי לכל הערוצים ברשימה. לחיצה על ❌ מסירה ערוץ.`;
+  await editMessageText(chatId, messageId, text, {
+    reply_markup: requiredChannelsKeyboard(
+      rows as any,
+      perm.length < MAX_PERMANENT_REQUIRED,
+      temp.length < MAX_TEMPORARY_REQUIRED,
+    ),
+  }).catch(() => {});
+}
+
+async function renderUsersList(
+  chatId: number,
+  messageId: number,
+  opts: { query: string; page: number; sort: "joined" | "recent"; blockedOnly: boolean },
+) {
+  let results: BotUserRow[];
+  let total: number;
+  let header: string;
+  if (opts.query) {
+    results = await searchBotUsers(opts.query, 30);
+    total = results.length;
+    header = `👤 <b>תוצאות חיפוש משתמשים</b>\n"<code>${escapeHtml(opts.query)}</code>" · ${total} תוצאות`;
+  } else {
+    const res = await listUsersPaged({
+      page: opts.page,
+      pageSize: USERS_PAGE_SIZE,
+      sort: opts.sort,
+      blockedOnly: opts.blockedOnly,
+    });
+    results = res.rows;
+    total = res.total;
+    const sortLabel = opts.sort === "joined" ? "לפי סדר הצטרפות" : "לפי שימוש אחרון";
+    header =
+      (opts.blockedOnly ? `🚫 <b>משתמשים חסומים</b>` : `👤 <b>משתמשי הבוט</b>`) +
+      `\nסה״כ: <b>${total.toLocaleString()}</b> · ${sortLabel}` +
+      `\nעמוד ${opts.page + 1}/${Math.max(1, Math.ceil(total / USERS_PAGE_SIZE))}`;
+  }
   const body = results.length
     ? "לחץ על משתמש כדי לראות פרטים ולחסום/לבטל חסימה."
     : "<i>לא נמצאו משתמשים.</i>";
@@ -1335,8 +1391,26 @@ async function renderUsersList(chatId: number, messageId: number, query: string)
       callback_data: `admin_user_${u.telegram_id}`,
     },
   ]);
+  const b = opts.blockedOnly ? "1" : "0";
+  if (!opts.query) {
+    const totalPages = Math.max(1, Math.ceil(total / USERS_PAGE_SIZE));
+    const nav: any[] = [];
+    if (opts.page > 0) nav.push({ text: "⬅️ הקודם", callback_data: `admin_ul:${opts.sort}:${opts.page - 1}:${b}` });
+    nav.push({ text: `${opts.page + 1}/${totalPages}`, callback_data: "noop" });
+    if (opts.page < totalPages - 1) nav.push({ text: "הבא ➡️", callback_data: `admin_ul:${opts.sort}:${opts.page + 1}:${b}` });
+    if (nav.length > 1) kb.push(nav);
+    kb.push([
+      { text: `${opts.sort === "joined" ? "✅ " : ""}📅 סדר הצטרפות`, callback_data: `admin_ul:joined:0:${b}` },
+      { text: `${opts.sort === "recent" ? "✅ " : ""}🕓 שימוש אחרון`, callback_data: `admin_ul:recent:0:${b}` },
+    ]);
+    kb.push([
+      opts.blockedOnly
+        ? { text: "👤 כל המשתמשים", callback_data: `admin_ul:${opts.sort}:0:0` }
+        : { text: "🚫 משתמשים חסומים", callback_data: `admin_ul:${opts.sort}:0:1` },
+    ]);
+  }
   kb.push([{ text: "🔎 חיפוש", callback_data: "admin_users_search" }]);
-  kb.push([{ text: "🔄 רענן", callback_data: "admin_users" }, { text: "« חזרה", callback_data: "admin_open" }]);
+  kb.push([{ text: "« חזרה", callback_data: "admin_open" }]);
   await editMessageText(chatId, messageId, `${header}\n\n${body}`, { reply_markup: { inline_keyboard: kb } }).catch(() => {});
 }
 

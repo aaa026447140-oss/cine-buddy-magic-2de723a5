@@ -134,14 +134,46 @@ function extractFile(msg: any) {
   return null;
 }
 
-async function isSubscribed(userId: number, settings: BotSettings): Promise<boolean> {
-  if (!settings.required_channel_id) return true; // no required channel set
-  try {
-    const m: any = await getChatMember(settings.required_channel_id, userId);
-    return ["creator", "administrator", "member", "restricted"].includes(m.status);
-  } catch {
-    return false;
+type RequiredTarget = { chat_id: number; title: string; url: string };
+
+/** Legacy single required channel + the multi list (permanent + live temporary). */
+async function requiredTargets(settings: BotSettings): Promise<RequiredTarget[]> {
+  const list = await listRequiredChannels().catch(() => []);
+  const targets: RequiredTarget[] = list.map((c) => ({
+    chat_id: c.chat_id,
+    title: c.title || c.username || String(c.chat_id),
+    url: c.invite_link || (c.username ? `https://t.me/${c.username}` : ""),
+  }));
+  if (settings.required_channel_id && !targets.some((t) => t.chat_id === Number(settings.required_channel_id))) {
+    targets.unshift({
+      chat_id: Number(settings.required_channel_id),
+      title: settings.required_channel_title || settings.required_channel_username || "ערוץ החובה",
+      url:
+        settings.required_channel_invite_link ||
+        (settings.required_channel_username ? `https://t.me/${settings.required_channel_username}` : ""),
+    });
   }
+  return targets;
+}
+
+async function missingRequiredChannels(userId: number, settings: BotSettings): Promise<RequiredTarget[]> {
+  const targets = await requiredTargets(settings);
+  if (!targets.length) return [];
+  const checks = await Promise.all(
+    targets.map(async (t) => {
+      try {
+        const m: any = await getChatMember(t.chat_id, userId);
+        return ["creator", "administrator", "member", "restricted"].includes(m.status) ? null : t;
+      } catch {
+        return t;
+      }
+    }),
+  );
+  return checks.filter(Boolean) as RequiredTarget[];
+}
+
+async function isSubscribed(userId: number, settings: BotSettings): Promise<boolean> {
+  return (await missingRequiredChannels(userId, settings)).length === 0;
 }
 
 async function requireSubscriptionOrPrompt(
@@ -150,14 +182,13 @@ async function requireSubscriptionOrPrompt(
   settings: BotSettings,
   recheckPayload: string,
 ): Promise<boolean> {
-  if (await isSubscribed(userId, settings)) return true;
-  const inviteUrl =
-    settings.required_channel_invite_link ||
-    (settings.required_channel_username ? `https://t.me/${settings.required_channel_username}` : "");
+  const missing = await missingRequiredChannels(userId, settings);
+  if (!missing.length) return true;
+  const lines = missing.map((m) => `• <b>${escapeHtml(m.title)}</b>`).join("\n");
   await sendMessage(
     chatId,
-    "🔒 כדי להשתמש בבוט עליך להיות מנוי לערוץ החובה שלנו.\n\nהצטרף ולחץ על «הצטרפתי, בדוק שוב».",
-    { reply_markup: subscribeRequiredKeyboard(inviteUrl, recheckPayload) },
+    `🔒 כדי להשתמש בבוט עליך להיות מנוי לערוצי החובה הבאים:\n\n${lines}\n\nהצטרף ולחץ על «הצטרפתי, בדוק שוב».`,
+    { reply_markup: subscribeChannelsKeyboard(missing, recheckPayload) },
   );
   return false;
 }

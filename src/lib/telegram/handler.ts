@@ -15,6 +15,14 @@ import { ADMIN_ID, PAGE_SIZE, STAR_AMOUNTS } from "./constants";
 import {
   addAdmin,
   addSourceChannel,
+  addRequiredChannel,
+  countBroadcastRecipients,
+  createBroadcastJob,
+  listRequiredChannels,
+  listUsersPaged,
+  removeRequiredChannel,
+  MAX_PERMANENT_REQUIRED,
+  MAX_TEMPORARY_REQUIRED,
   cacheQuery,
   cacheSearchAll,
   getCachedSearch,
@@ -50,9 +58,12 @@ import {
   type BotSettings,
   type BotUserRow,
 } from "./db";
+import { processBroadcastTick } from "./broadcast";
 import {
   adminPanelKeyboard,
   adminsListKeyboard,
+  requiredChannelsKeyboard,
+  subscribeChannelsKeyboard,
   resultsKeyboard,
   sourceChannelsKeyboard,
   startMenuKeyboard,

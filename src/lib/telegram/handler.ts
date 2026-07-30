@@ -961,6 +961,12 @@ async function handleAdminCallback(cq: any, data: string) {
       return await renderUserView(chatId, messageId, tid);
     }
   }
+  if (data === "admin_unblock_all") {
+    const n = await unblockAllUsers().catch(() => 0);
+    await answerCallbackQuery.length; // no-op guard
+    await renderUsersList(chatId, messageId, { query: "", page: 0, sort: "recent", blockedOnly: true });
+    return await sendMessage(chatId, `✅ שוחררו <b>${n}</b> משתמשים חסומים.`);
+  }
   if (data.startsWith("admin_grp_")) {
     const cid = Number(data.slice("admin_grp_".length));
     if (!Number.isFinite(cid)) return;

@@ -1101,6 +1101,65 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
   }
 
   if (st.state === "awaiting_search_group") {
+    // handled below
+  }
+
+  if (st.state === "awaiting_required_add") {
+    const kind: "permanent" | "temporary" = st.data?.kind === "temporary" ? "temporary" : "permanent";
+    const parts = text.split(/\s+/);
+    const ref = parts[0] || "";
+    const days = Number(parts[1] ?? "0");
+    if (kind === "temporary" && (!Number.isFinite(days) || days <= 0)) {
+      await sendMessage(chatId, "❌ חסר מספר ימים. דוגמה: <code>@my_channel 7</code>. או /cancel לביטול.");
+      return;
+    }
+    const existing = await listRequiredChannels();
+    const count = existing.filter((c) => (c.kind === "temporary") === (kind === "temporary")).length;
+    const max = kind === "temporary" ? MAX_TEMPORARY_REQUIRED : MAX_PERMANENT_REQUIRED;
+    if (count >= max) {
+      await setAdminState(userId, null);
+      await sendMessage(chatId, `❌ הגעת למקסימום (${max}) ערוצי חובה מסוג זה. הסר ערוץ קיים תחילה.`);
+      return;
+    }
+    const chatRef = ref.startsWith("@") || ref.startsWith("-") || /^\d+$/.test(ref) ? ref : `@${ref}`;
+    try {
+      const ch: any = await getChat(chatRef);
+      const me = await getMe();
+      const mem: any = await getChatMember(ch.id, me.id).catch(() => null);
+      if (!mem || !["administrator", "creator"].includes(mem.status)) {
+        await sendMessage(chatId, "❌ הבוט לא אדמין בערוץ הזה. הוסף אותו כאדמין ונסה שוב.");
+        return;
+      }
+      let invite = ch.invite_link as string | null;
+      if (!invite && !ch.username) {
+        try {
+          const link: any = await tg("createChatInviteLink", { chat_id: ch.id });
+          invite = link.invite_link;
+        } catch {}
+      }
+      const expires_at = kind === "temporary" ? new Date(Date.now() + days * 86400_000).toISOString() : null;
+      await addRequiredChannel({
+        chat_id: Number(ch.id),
+        username: ch.username || null,
+        title: ch.title || null,
+        invite_link: invite || (ch.username ? `https://t.me/${ch.username}` : null),
+        kind,
+        expires_at,
+        added_by: userId,
+      });
+      await setAdminState(userId, null);
+      await sendMessage(
+        chatId,
+        `✅ ערוץ חובה ${kind === "temporary" ? `<b>זמני</b> (${days} ימים)` : "<b>קבוע</b>"} נוסף: ` +
+          `<b>${escapeHtml(ch.title || ch.username || String(ch.id))}</b>`,
+      );
+    } catch (e: any) {
+      await sendMessage(chatId, `❌ לא הצלחתי לאמת את הערוץ.\n${escapeHtml(e?.description || e?.message || "")}`);
+    }
+    return;
+  }
+
+  if (st.state === "awaiting_search_group") {
     await setAdminState(userId, null);
     if (/^מחק$/i.test(text) || /^remove$/i.test(text) || /^clear$/i.test(text)) {
       await updateSettings({ search_group_url: null, search_group_title: null });

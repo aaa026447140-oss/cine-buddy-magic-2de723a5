@@ -784,3 +784,171 @@ function pageRequestId(scope: string) {
 function allCacheId(id: string) {
   return `${id}:all`;
 }
+
+// ───── Required channels (multi: up to 3 permanent + 5 temporary) ─────
+export type RequiredChannelRow = {
+  chat_id: number;
+  username: string | null;
+  title: string | null;
+  invite_link: string | null;
+  kind: "permanent" | "temporary";
+  expires_at: string | null;
+};
+
+export const MAX_PERMANENT_REQUIRED = 3;
+export const MAX_TEMPORARY_REQUIRED = 5;
+
+export async function listRequiredChannels(): Promise<RequiredChannelRow[]> {
+  const { data } = await admin()
+    .from("required_channels")
+    .select("chat_id,username,title,invite_link,kind,expires_at")
+    .order("created_at", { ascending: true });
+  const rows = ((data ?? []) as any[]).map((r) => ({ ...r, chat_id: Number(r.chat_id) })) as RequiredChannelRow[];
+  // Drop expired temporary channels lazily.
+  const now = Date.now();
+  const expired = rows.filter((r) => r.expires_at && new Date(r.expires_at).getTime() < now);
+  if (expired.length) {
+    await admin().from("required_channels").delete().in("chat_id", expired.map((r) => r.chat_id));
+  }
+  return rows.filter((r) => !r.expires_at || new Date(r.expires_at).getTime() >= now);
+}
+
+export async function addRequiredChannel(p: {
+  chat_id: number;
+  username: string | null;
+  title: string | null;
+  invite_link: string | null;
+  kind: "permanent" | "temporary";
+  expires_at: string | null;
+  added_by: number;
+}) {
+  await admin().from("required_channels").upsert(p as any, { onConflict: "chat_id" });
+}
+
+export async function removeRequiredChannel(chat_id: number) {
+  await admin().from("required_channels").delete().eq("chat_id", chat_id);
+}
+
+// ───── Users listing (paged + sortable) ─────
+export type UserSort = "joined" | "recent";
+
+export async function listUsersPaged(opts: {
+  page: number;
+  pageSize: number;
+  sort: UserSort;
+  blockedOnly?: boolean;
+}): Promise<{ rows: BotUserRow[]; total: number }> {
+  const from = opts.page * opts.pageSize;
+  let req: any = admin()
+    .from("bot_users")
+    .select("telegram_id,username,first_name,last_name,is_blocked,first_seen,last_seen", { count: "exact" });
+  if (opts.blockedOnly) req = req.eq("is_blocked", true);
+  req =
+    opts.sort === "joined"
+      ? req.order("first_seen", { ascending: true })
+      : req.order("last_seen", { ascending: false });
+  const { data, count } = await req.range(from, from + opts.pageSize - 1);
+  return { rows: ((data ?? []) as any) as BotUserRow[], total: count ?? 0 };
+}
+
+// ───── Broadcast jobs (resumable, so a broadcast always finishes) ─────
+export type BroadcastJob = {
+  id: number;
+  admin_user_id: number;
+  admin_chat_id: number;
+  status_msg_id: number | null;
+  target: "private" | "groups" | "all";
+  from_chat_id: number;
+  message_id: number;
+  phase: "groups" | "private" | "done";
+  cursor_id: number;
+  sent: number;
+  failed: number;
+  total: number;
+  status: "running" | "done" | "error";
+  resume_after: string;
+};
+
+export async function createBroadcastJob(p: {
+  admin_user_id: number;
+  admin_chat_id: number;
+  status_msg_id: number | null;
+  target: "private" | "groups" | "all";
+  from_chat_id: number;
+  message_id: number;
+  total: number;
+}): Promise<BroadcastJob> {
+  const phase = p.target === "private" ? "private" : "groups";
+  const { data, error } = await admin()
+    .from("broadcast_jobs")
+    .insert({ ...p, phase } as any)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as any;
+}
+
+export async function updateBroadcastJob(id: number, patch: Partial<BroadcastJob> & { last_error?: string | null; locked_at?: string | null }) {
+  await admin()
+    .from("broadcast_jobs")
+    .update({ ...patch, updated_at: new Date().toISOString() } as any)
+    .eq("id", id);
+}
+
+export async function getBroadcastJob(id: number): Promise<BroadcastJob | null> {
+  const { data } = await admin().from("broadcast_jobs").select("*").eq("id", id).maybeSingle();
+  return (data as any) ?? null;
+}
+
+/** Claim the oldest runnable job (simple lease so parallel ticks don't collide). */
+export async function claimBroadcastJob(): Promise<BroadcastJob | null> {
+  const staleBefore = new Date(Date.now() - 120_000).toISOString();
+  const { data } = await admin()
+    .from("broadcast_jobs")
+    .select("*")
+    .eq("status", "running")
+    .lte("resume_after", new Date().toISOString())
+    .or(`locked_at.is.null,locked_at.lt.${staleBefore}`)
+    .order("id", { ascending: true })
+    .limit(1);
+  const job = (data ?? [])[0] as any as BroadcastJob | undefined;
+  if (!job) return null;
+  await updateBroadcastJob(job.id, { locked_at: new Date().toISOString() } as any);
+  return job;
+}
+
+export async function nextGroupBatch(afterId: number, limit: number): Promise<number[]> {
+  const { data } = await admin()
+    .from("bot_groups")
+    .select("chat_id")
+    .eq("is_active", true)
+    .gt("chat_id", afterId)
+    .order("chat_id", { ascending: true })
+    .limit(limit);
+  return (data ?? []).map((r: any) => Number(r.chat_id));
+}
+
+export async function nextUserBatch(afterId: number, limit: number): Promise<number[]> {
+  const { data } = await admin()
+    .from("bot_users")
+    .select("telegram_id")
+    .eq("is_blocked", false)
+    .gt("telegram_id", afterId)
+    .order("telegram_id", { ascending: true })
+    .limit(limit);
+  return (data ?? []).map((r: any) => Number(r.telegram_id));
+}
+
+export async function countBroadcastRecipients(target: "private" | "groups" | "all"): Promise<number> {
+  const a = admin();
+  let total = 0;
+  if (target === "private" || target === "all") {
+    const { count } = await a.from("bot_users").select("*", { count: "exact", head: true }).eq("is_blocked", false);
+    total += count ?? 0;
+  }
+  if (target === "groups" || target === "all") {
+    const { count } = await a.from("bot_groups").select("*", { count: "exact", head: true }).eq("is_active", true);
+    total += count ?? 0;
+  }
+  return total;
+}

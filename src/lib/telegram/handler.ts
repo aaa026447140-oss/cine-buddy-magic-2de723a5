@@ -921,7 +921,32 @@ async function handleAdminCallback(cq: any, data: string) {
       );
   }
   if (data === "admin_users") {
-    return await renderUsersList(chatId, messageId, "");
+    return await renderUsersList(chatId, messageId, { query: "", page: 0, sort: "recent", blockedOnly: false });
+  }
+  if (data.startsWith("admin_ul:")) {
+    const [, sort, pageText, blockedText] = data.split(":");
+    return await renderUsersList(chatId, messageId, {
+      query: "",
+      page: Math.max(0, Number(pageText) || 0),
+      sort: sort === "joined" ? "joined" : "recent",
+      blockedOnly: blockedText === "1",
+    });
+  }
+  if (data.startsWith("admin_req_rm_")) {
+    const cid = Number(data.slice("admin_req_rm_".length));
+    if (Number.isFinite(cid)) {
+      await removeRequiredChannel(cid).catch(() => {});
+      const settings = await getSettings();
+      if (Number(settings.required_channel_id || 0) === cid) {
+        await updateSettings({
+          required_channel_id: null,
+          required_channel_username: null,
+          required_channel_title: null,
+          required_channel_invite_link: null,
+        }).catch(() => {});
+      }
+    }
+    return await renderRequiredChannels(chatId, messageId);
   }
   if (data === "admin_users_search") {
     await setAdminState(userId, "awaiting_user_search");

@@ -752,7 +752,15 @@ async function handleAdminCallback(cq: any, data: string) {
   await answerCallbackQuery(cq.id);
 
   // Main-admin-only actions
-  if (!main && (data === "admin_set_required" || data === "admin_manage" || data === "admin_add" || data.startsWith("admin_rm_"))) {
+  if (
+    !main &&
+    (data === "admin_set_required" ||
+      data === "admin_required" ||
+      data.startsWith("admin_req_") ||
+      data === "admin_manage" ||
+      data === "admin_add" ||
+      data.startsWith("admin_rm_"))
+  ) {
     return;
   }
 
@@ -848,6 +856,22 @@ async function handleAdminCallback(cq: any, data: string) {
           "דוגמה: <code>@my_channel</code>.\n" +
           "ודא שהבוט הוסף לערוץ <b>כאדמין</b>.\n\n" +
           "שלח /cancel לביטול.",
+      );
+    case "admin_required":
+      return await renderRequiredChannels(chatId, messageId);
+    case "admin_req_add_perm":
+      await setAdminState(userId, "awaiting_required_add", { kind: "permanent" });
+      return await sendMessage(
+        chatId,
+        "📌 שלח את <b>שם המשתמש</b> או <b>ה-ID</b> של ערוץ חובה <b>קבוע</b>.\n" +
+          "דוגמה: <code>@my_channel</code>\nהבוט חייב להיות אדמין בערוץ.\n\nשלח /cancel לביטול.",
+      );
+    case "admin_req_add_temp":
+      await setAdminState(userId, "awaiting_required_add", { kind: "temporary" });
+      return await sendMessage(
+        chatId,
+        "⏳ שלח ערוץ חובה <b>זמני</b> ומספר ימים, בפורמט:\n\n" +
+          "<code>@my_channel 7</code> — חובה למשך 7 ימים\n\nהבוט חייב להיות אדמין בערוץ.\n\nשלח /cancel לביטול.",
       );
     case "admin_set_search_group":
       await setAdminState(userId, "awaiting_search_group");

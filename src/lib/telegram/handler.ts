@@ -302,23 +302,10 @@ async function handleMessage(msg: any) {
   // Admin multi-step flow
   if (await isAdmin(from.id)) {
     const st = await getAdminState(Number(from.id));
-    // While a broadcast is running for this admin, ignore any incoming
-    // text so the broadcast message itself isn't treated as a search
-    // query (Telegram may retry the same update after 60s). /cancel is
-    // intentionally ignored here to avoid killing an in-flight run.
+    // Legacy leftover state from the old in-request broadcast: never lock the
+    // admin out — broadcasts now run as resumable background jobs.
     if (st?.state === "broadcasting") {
-      // Safety valve: if the worker died mid-broadcast the state would stay
-      // forever and the bot would look "dead" for that admin. Consider the
-      // state stale when no heartbeat arrived for 90s, or on explicit /cancel.
-      const hb = Number(st.data?.heartbeat_at ?? st.data?.started_at ?? 0);
-      const stale = !hb || Date.now() - hb > 90_000;
-      if (text === "/cancel" || stale) {
-        await setAdminState(Number(from.id), null).catch(() => {});
-        await sendMessage(chat.id, stale && text !== "/cancel"
-          ? "⚠️ שידור קודם נתקע ואופס. אפשר להמשיך כרגיל."
-          : "❎ מצב השידור בוטל.").catch(() => {});
-        return;
-      }
+      await setAdminState(Number(from.id), null).catch(() => {});
       return;
     }
     if (st && (text === "/cancel" || !text.startsWith("/"))) {

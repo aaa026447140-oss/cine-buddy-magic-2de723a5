@@ -100,8 +100,9 @@ export async function processBroadcastTick(budgetMs = 20_000, jobId?: number): P
           delivered = true;
           const desc: string = e?.description || "";
           if (e?.code === 403 || /blocked|deactivated|kicked|chat not found/i.test(desc)) {
+            // Only groups are deactivated automatically. Private users are NEVER
+            // auto-blocked — is_blocked is reserved for manual admin bans.
             if (isGroupPhase) await markGroupInactive(chatId).catch(() => {});
-            else await markUserBlocked(chatId).catch(() => {});
           }
         }
       }

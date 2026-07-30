@@ -1100,10 +1100,6 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
     return;
   }
 
-  if (st.state === "awaiting_search_group") {
-    // handled below
-  }
-
   if (st.state === "awaiting_required_add") {
     const kind: "permanent" | "temporary" = st.data?.kind === "temporary" ? "temporary" : "permanent";
     const parts = text.split(/\s+/);

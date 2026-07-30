@@ -1197,28 +1197,29 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
 
   if (st.state === "awaiting_broadcast") {
     const target = st.data?.target as "private" | "groups" | "all";
-    // Send the live status message first so we can edit it as progress advances.
+    // Clear the state immediately so the admin is never locked out.
+    await setAdminState(userId, null).catch(() => {});
+    const total = await countBroadcastRecipients(target).catch(() => 0);
     const status: any = await sendMessage(
       chatId,
-      `🚀 <b>מתחיל שידור...</b>\nיעד: ${target}`,
+      `\ud83d\ude80 <b>\u05de\u05ea\u05d7\u05d9\u05dc \u05e9\u05d9\u05d3\u05d5\u05e8...</b>\n\u05d9\u05e2\u05d3: ${target}\n\u05e1\u05d4\u05f4\u05db \u05e0\u05de\u05e2\u05e0\u05d9\u05dd: <b>${total.toLocaleString()}</b>`,
     ).catch(() => null);
-    const statusMsgId: number | null = status?.message_id ?? null;
-    // Mark admin state as "broadcasting" so any incoming text from this
-    // admin (including the broadcast message itself on Telegram retries)
-    // is ignored instead of being treated as a search query.
-    await setAdminState(userId, "broadcasting", {
-      target,
-      status_msg_id: statusMsgId,
-      started_at: Date.now(),
-      heartbeat_at: Date.now(),
-    });
     try {
-      await runBroadcast(chatId, userId, target, msg, statusMsgId);
+      const job = await createBroadcastJob({
+        admin_user_id: userId,
+        admin_chat_id: chatId,
+        status_msg_id: status?.message_id ?? null,
+        target,
+        from_chat_id: Number(msg.chat.id),
+        message_id: Number(msg.message_id),
+        total,
+      });
+      // Start right away; the cron tick resumes the job until it is complete,
+      // so the broadcast always reaches every recipient.
+      await processBroadcastTick(15_000, job.id);
     } catch (e: any) {
       console.error("broadcast error:", e?.message || e);
-      await sendMessage(chatId, `❌ שגיאה בשידור: ${escapeHtml(e?.message || String(e))}`).catch(() => {});
-    } finally {
-      await setAdminState(userId, null).catch(() => {});
+      await sendMessage(chatId, `\u274c \u05e9\u05d2\u05d9\u05d0\u05d4 \u05d1\u05e9\u05d9\u05d3\u05d5\u05e8: ${escapeHtml(e?.message || String(e))}`).catch(() => {});
     }
     return;
   }
@@ -1243,115 +1244,6 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
       `✅ <code>${tid}</code> נוסף כאדמין${expires_at ? ` עד <b>${new Date(expires_at).toLocaleString("he-IL")}</b>` : " <b>קבוע</b>"}.`,
     );
     return;
-  }
-}
-
-async function runBroadcast(
-  adminChatId: number,
-  adminUserId: number,
-  target: "private" | "groups" | "all",
-  srcMsg: any,
-  statusMsgId: number | null,
-) {
-  const users = target === "private" || target === "all" ? await listUsers() : [];
-  const groups = target === "groups" || target === "all" ? await listGroups() : [];
-  const recipients: { id: number; pin: boolean }[] = [
-    ...users.map((id) => ({ id, pin: false })),
-    ...groups.map((id) => ({ id, pin: true })),
-  ];
-  let sent = 0;
-  let failed = 0;
-  const fromChatId = srcMsg.chat.id;
-  const messageId = srcMsg.message_id;
-  const total = recipients.length;
-  let lastEditAt = 0;
-  let lastEditedText = "";
-  let lastHeartbeat = Date.now();
-  let rateLimitWaits = 0;
-  let lastRetryAfter = 0;
-
-  // Telegram flood-control (429) aware sender: waits retry_after and resumes.
-  const withFloodWait = async <T>(fn: () => Promise<T>): Promise<T> => {
-    for (let attempt = 0; attempt < 6; attempt++) {
-      try {
-        return await fn();
-      } catch (e: any) {
-        const retryAfter = Number(e?.parameters?.retry_after ?? 0);
-        if (e?.code === 429 && retryAfter > 0) {
-          rateLimitWaits++;
-          lastRetryAfter = retryAfter;
-          await sendMessage(
-            adminChatId,
-            `⏳ קיבלתי באן זמני מטלגרם (Flood control). ממתין <b>${retryAfter}</b> שניות וממשיך.`,
-          ).catch(() => {});
-          await sleep((retryAfter + 1) * 1000);
-          continue;
-        }
-        throw e;
-      }
-    }
-    throw new Error("flood control: too many retries");
-  };
-
-  const renderStatus = (done: boolean) =>
-    (done ? `✅ <b>שידור הסתיים</b>\n\n` : `📤 <b>שידור בתהליך...</b>\n\n`) +
-    `יעד: ${target}\n` +
-    `סה״כ: <b>${total.toLocaleString()}</b>\n` +
-    `נשלח: <b>${sent.toLocaleString()}</b>\n` +
-    `נכשל: <b>${failed.toLocaleString()}</b>\n` +
-    `התקדמות: <b>${sent + failed}/${total}</b>` +
-    (rateLimitWaits
-      ? `\n⏳ המתנות עקב הגבלת טלגרם: <b>${rateLimitWaits}</b> (אחרונה: ${lastRetryAfter}s)`
-      : "");
-
-  const tryEditStatus = async (force: boolean) => {
-    if (!statusMsgId) return;
-    const now = Date.now();
-    if (!force && now - lastEditAt < 1500) return;
-    const text = renderStatus(false);
-    if (text === lastEditedText) return;
-    lastEditAt = now;
-    lastEditedText = text;
-    await editMessageText(adminChatId, statusMsgId, text).catch(() => {});
-  };
-
-  for (let i = 0; i < recipients.length; i++) {
-    const r = recipients[i];
-    try {
-      const copied: any = await withFloodWait(() => copyMessage(r.id, fromChatId, messageId));
-      sent++;
-      if (r.pin && copied?.message_id) {
-        await pinChatMessage(r.id, copied.message_id, true).catch(() => {});
-      }
-    } catch (e: any) {
-      failed++;
-      const code = e?.code;
-      const desc: string = e?.description || "";
-      if (code === 403 || /blocked|deactivated|kicked|chat not found/i.test(desc)) {
-        if (r.pin) await markGroupInactive(r.id).catch(() => {});
-        else await markUserBlocked(r.id).catch(() => {});
-      }
-    }
-    // Telegram rate limit: ~30 msg/sec global
-    if (i % 25 === 24) await sleep(1000);
-    // Live-edit the status message ~every 1.5s
-    await tryEditStatus(false);
-    // Heartbeat so a crashed run can be detected and never blocks the admin.
-    if (Date.now() - lastHeartbeat > 15_000) {
-      lastHeartbeat = Date.now();
-      await setAdminState(adminUserId, "broadcasting", {
-        target,
-        status_msg_id: statusMsgId,
-        heartbeat_at: lastHeartbeat,
-      }).catch(() => {});
-    }
-  }
-  const finalText = renderStatus(true);
-  if (statusMsgId) {
-    const edited = await editMessageText(adminChatId, statusMsgId, finalText).catch(() => null);
-    if (!edited) await sendMessage(adminChatId, finalText).catch(() => {});
-  } else {
-    await sendMessage(adminChatId, finalText).catch(() => {});
   }
 }
 

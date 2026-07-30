@@ -3,7 +3,6 @@ import {
   claimBroadcastJob,
   getBroadcastJob,
   markGroupInactive,
-  markUserBlocked,
   nextGroupBatch,
   nextUserBatch,
   updateBroadcastJob,

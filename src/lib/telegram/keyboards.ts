@@ -87,16 +87,49 @@ export function subscribeRequiredKeyboard(inviteUrl: string, recheckPayload: str
   };
 }
 
+/** Join buttons for every required channel the user is still missing. */
+export function subscribeChannelsKeyboard(
+  missing: { title: string; url: string }[],
+  recheckPayload: string,
+) {
+  const rows: any[][] = missing
+    .filter((m) => m.url)
+    .map((m) => [{ text: `📢 הצטרף — ${truncate(m.title, 40)}`, url: m.url }]);
+  rows.push([{ text: "✅ הצטרפתי, בדוק שוב", callback_data: `check_${recheckPayload}` }]);
+  return { inline_keyboard: rows };
+}
+
+export function requiredChannelsKeyboard(
+  channels: { chat_id: number; title: string | null; username: string | null; kind: string; expires_at: string | null }[],
+  canAddPermanent: boolean,
+  canAddTemporary: boolean,
+) {
+  const rows: any[][] = [];
+  for (const c of channels) {
+    const icon = c.kind === "temporary" ? "⏳" : "📌";
+    rows.push([
+      { text: `❌ ${icon} ${truncate(c.title || c.username || String(c.chat_id), 40)}`, callback_data: `admin_req_rm_${c.chat_id}` },
+    ]);
+  }
+  if (canAddPermanent) rows.push([{ text: "➕ הוסף ערוץ חובה קבוע", callback_data: "admin_req_add_perm" }]);
+  if (canAddTemporary) rows.push([{ text: "⏳ הוסף ערוץ חובה זמני", callback_data: "admin_req_add_temp" }]);
+  rows.push([{ text: "« חזרה", callback_data: "admin_open" }]);
+  return { inline_keyboard: rows };
+}
+
 export function adminPanelKeyboard(isMain: boolean) {
   const rows: any[][] = [
     [{ text: "🎬 ניהול ערוצי סרטים", callback_data: "admin_sources" }],
   ];
   if (isMain) {
-    rows.push([{ text: "🔒 הגדרת ערוץ חובה", callback_data: "admin_set_required" }]);
+    rows.push([{ text: "🔒 ניהול ערוצי חובה", callback_data: "admin_required" }]);
   }
   rows.push([{ text: "🔎 הגדרת קבוצת חיפוש", callback_data: "admin_set_search_group" }]);
   rows.push([{ text: "📊 סטטיסטיקות", callback_data: "admin_stats" }]);
-  rows.push([{ text: "👤 משתמשים", callback_data: "admin_users" }]);
+  rows.push([
+    { text: "👤 משתמשים", callback_data: "admin_users" },
+    { text: "🚫 משתמשים חסומים", callback_data: "admin_ul:recent:0:1" },
+  ]);
   rows.push([{ text: "📣 שידור לפרטיים", callback_data: "admin_bc_private" }]);
   rows.push([{ text: "📣 שידור לקבוצות", callback_data: "admin_bc_groups" }]);
   rows.push([{ text: "📣 שידור לכולם", callback_data: "admin_bc_all" }]);

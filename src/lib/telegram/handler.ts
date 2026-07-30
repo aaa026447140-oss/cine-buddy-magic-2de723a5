@@ -42,6 +42,7 @@ import {
   markGroupInactive,
   markUserBlocked,
   unmarkUserBlocked,
+  unblockAllUsers,
   recordPayment,
   removeAdmin,
   removeSourceChannel,
@@ -960,6 +961,11 @@ async function handleAdminCallback(cq: any, data: string) {
       return await renderUserView(chatId, messageId, tid);
     }
   }
+  if (data === "admin_unblock_all") {
+    const n = await unblockAllUsers().catch(() => 0);
+    await renderUsersList(chatId, messageId, { query: "", page: 0, sort: "recent", blockedOnly: true });
+    return await sendMessage(chatId, `✅ שוחררו <b>${n}</b> משתמשים חסומים.`);
+  }
   if (data.startsWith("admin_grp_")) {
     const cid = Number(data.slice("admin_grp_".length));
     if (!Number.isFinite(cid)) return;
@@ -1342,6 +1348,9 @@ async function renderUsersList(
         ? { text: "👤 כל המשתמשים", callback_data: `admin_ul:${opts.sort}:0:0` }
         : { text: "🚫 משתמשים חסומים", callback_data: `admin_ul:${opts.sort}:0:1` },
     ]);
+    if (opts.blockedOnly && total > 0) {
+      kb.push([{ text: "♻️ שחרר את כל החסומים", callback_data: "admin_unblock_all" }]);
+    }
   }
   kb.push([{ text: "🔎 חיפוש", callback_data: "admin_users_search" }]);
   kb.push([{ text: "« חזרה", callback_data: "admin_open" }]);

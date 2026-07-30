@@ -890,14 +890,19 @@ export async function createBroadcastJob(p: {
   total: number;
 }): Promise<BroadcastJob> {
   const phase = p.target === "private" ? "private" : "groups";
+  // Group chat_ids are negative, so the batch cursor must start below them.
+  const cursor_id = phase === "groups" ? GROUP_CURSOR_START : 0;
   const { data, error } = await admin()
     .from("broadcast_jobs")
-    .insert({ ...p, phase } as any)
+    .insert({ ...p, phase, cursor_id } as any)
     .select("*")
     .single();
   if (error) throw error;
   return data as any;
 }
+
+/** Sentinel below any Telegram group id (-100xxxxxxxxxx). */
+export const GROUP_CURSOR_START = -9007199254740000;
 
 export async function updateBroadcastJob(id: number, patch: Partial<BroadcastJob> & { last_error?: string | null; locked_at?: string | null }) {
   await admin()

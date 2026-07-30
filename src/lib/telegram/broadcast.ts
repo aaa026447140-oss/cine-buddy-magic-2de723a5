@@ -2,6 +2,7 @@ import { copyMessage, editMessageText, pinChatMessage, sendMessage } from "./api
 import {
   claimBroadcastJob,
   getBroadcastJob,
+  GROUP_CURSOR_START,
   markGroupInactive,
   nextGroupBatch,
   nextUserBatch,
@@ -45,6 +46,13 @@ export async function processBroadcastTick(budgetMs = 20_000, jobId?: number): P
   if (!job || job.status !== "running") return "no-job";
 
   let lastStatusAt = 0;
+
+  // Legacy/reset safety: a groups phase must never start at 0 because group
+  // chat ids are negative and would all be skipped by the cursor.
+  if (job.phase === "groups" && job.cursor_id >= 0) {
+    job = { ...job, cursor_id: GROUP_CURSOR_START };
+    await updateBroadcastJob(job.id, { cursor_id: GROUP_CURSOR_START } as any);
+  }
 
   while (Date.now() - started < budgetMs) {
     if (job.phase === "done") break;

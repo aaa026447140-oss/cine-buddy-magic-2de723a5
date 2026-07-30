@@ -42,6 +42,7 @@ import {
   markGroupInactive,
   markUserBlocked,
   unmarkUserBlocked,
+  unblockAllUsers,
   recordPayment,
   removeAdmin,
   removeSourceChannel,

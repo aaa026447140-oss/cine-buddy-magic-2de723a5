@@ -84,6 +84,17 @@ export async function unmarkUserBlocked(telegram_id: number) {
   await admin().from("bot_users").update({ is_blocked: false }).eq("telegram_id", telegram_id);
 }
 
+/** Unblock every currently blocked user. Returns how many were released. */
+export async function unblockAllUsers(): Promise<number> {
+  const a = admin();
+  const { count } = await a
+    .from("bot_users")
+    .select("*", { count: "exact", head: true })
+    .eq("is_blocked", true);
+  await a.from("bot_users").update({ is_blocked: false }).eq("is_blocked", true);
+  return count ?? 0;
+}
+
 export type BotUserRow = {
   telegram_id: number;
   username: string | null;

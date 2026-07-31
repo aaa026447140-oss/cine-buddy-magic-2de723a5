@@ -1470,6 +1470,21 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
     return;
   }
 
+  if (st.state === "awaiting_prem_search") {
+    await setAdminState(userId, null);
+    const results = await searchBotUsers(text, 20);
+    const kb: any[][] = await premiumUserRows(results);
+    kb.push([{ text: "🔎 חיפוש נוסף", callback_data: "admin_prem_search" }]);
+    kb.push([{ text: "« חזרה", callback_data: "admin_prem:recent:0" }]);
+    await sendMessage(
+      chatId,
+      `💎 <b>ניהול פרימיום — תוצאות חיפוש</b>\n"<code>${escapeHtml(text)}</code>" · ${results.length} תוצאות\n\n` +
+        (results.length ? "לחץ על משתמש כדי להעניק או להסיר פרימיום." : "<i>לא נמצאו משתמשים.</i>"),
+      { reply_markup: { inline_keyboard: kb } },
+    );
+    return;
+  }
+
   if (st.state === "awaiting_user_search") {
     await setAdminState(userId, null);
     const results = await searchBotUsers(text, 30);

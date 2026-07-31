@@ -1,4 +1,4 @@
-import { INVITE_PRIVATE_BOT_URL, STAR_AMOUNTS } from "./constants";
+import { STAR_AMOUNTS } from "./constants";
 import type { BotSettings } from "./db";
 
 export function startMenuKeyboard(s: BotSettings, botUsername: string) {
@@ -26,7 +26,6 @@ export function startMenuKeyboard(s: BotSettings, botUsername: string) {
     { text: "❤️ תמיכה בבוט", callback_data: "support_menu" },
     { text: "➕ הוספה לקבוצה", url: `https://t.me/${botUsername}?startgroup=true&admin=${addRights}` },
   ]);
-  rows.push([{ text: "🤖 הזמנת בוט פרטי משלכם", url: INVITE_PRIVATE_BOT_URL }]);
   rows.push([{ text: "📢 פרסום ממומן", callback_data: "ads_menu" }]);
   return { inline_keyboard: rows };
 }
@@ -71,10 +70,7 @@ export function resultsKeyboard(
   } else {
     rows.push([{ text: `🧹 הפעל סינון כפילויות`, callback_data: `dup:${queryId}:1:${page}` }]);
   }
-  rows.push([
-    { text: "🤖 הזמנת בוט פרטי", url: INVITE_PRIVATE_BOT_URL },
-    { text: "❤️ תמיכה בבוט", callback_data: "support_menu" },
-  ]);
+  rows.push([{ text: "❤️ תמיכה בבוט", callback_data: "support_menu" }]);
   return { inline_keyboard: rows };
 }
 

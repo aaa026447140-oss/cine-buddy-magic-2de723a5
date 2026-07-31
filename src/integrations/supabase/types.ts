@@ -89,7 +89,12 @@ export type Database = {
       bot_settings: {
         Row: {
           builder_username: string | null
+          free_searches_per_day: number
           id: number
+          price_daily_extra: number
+          price_premium: number
+          price_single_search: number
+          quota_enabled: boolean
           required_channel_id: number | null
           required_channel_invite_link: string | null
           required_channel_title: string | null
@@ -105,7 +110,12 @@ export type Database = {
         }
         Insert: {
           builder_username?: string | null
+          free_searches_per_day?: number
           id?: number
+          price_daily_extra?: number
+          price_premium?: number
+          price_single_search?: number
+          quota_enabled?: boolean
           required_channel_id?: number | null
           required_channel_invite_link?: string | null
           required_channel_title?: string | null
@@ -121,7 +131,12 @@ export type Database = {
         }
         Update: {
           builder_username?: string | null
+          free_searches_per_day?: number
           id?: number
+          price_daily_extra?: number
+          price_premium?: number
+          price_single_search?: number
+          quota_enabled?: boolean
           required_channel_id?: number | null
           required_channel_invite_link?: string | null
           required_channel_title?: string | null
@@ -287,6 +302,24 @@ export type Database = {
         }
         Relationships: []
       }
+      group_members: {
+        Row: {
+          chat_id: number
+          last_seen: string
+          user_id: number
+        }
+        Insert: {
+          chat_id: number
+          last_seen?: string
+          user_id: number
+        }
+        Update: {
+          chat_id?: number
+          last_seen?: string
+          user_id?: number
+        }
+        Relationships: []
+      }
       movies: {
         Row: {
           created_at: string
@@ -377,6 +410,24 @@ export type Database = {
         }
         Relationships: []
       }
+      search_usage: {
+        Row: {
+          day: string
+          telegram_id: number
+          used: number
+        }
+        Insert: {
+          day?: string
+          telegram_id: number
+          used?: number
+        }
+        Update: {
+          day?: string
+          telegram_id?: number
+          used?: number
+        }
+        Relationships: []
+      }
       star_payments: {
         Row: {
           created_at: string
@@ -407,11 +458,54 @@ export type Database = {
         }
         Relationships: []
       }
+      user_entitlements: {
+        Row: {
+          bonus_daily: number
+          created_at: string
+          extra_credits: number
+          is_premium: boolean
+          premium_since: string | null
+          referrals_count: number
+          referred_by: number | null
+          telegram_id: number
+          updated_at: string
+        }
+        Insert: {
+          bonus_daily?: number
+          created_at?: string
+          extra_credits?: number
+          is_premium?: boolean
+          premium_since?: string | null
+          referrals_count?: number
+          referred_by?: number | null
+          telegram_id: number
+          updated_at?: string
+        }
+        Update: {
+          bonus_daily?: number
+          created_at?: string
+          extra_credits?: number
+          is_premium?: boolean
+          premium_since?: string | null
+          referrals_count?: number
+          referred_by?: number | null
+          telegram_id?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      consume_search: {
+        Args: { _limit: number; _telegram_id: number }
+        Returns: {
+          allowed: boolean
+          used: number
+        }[]
+      }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
     }

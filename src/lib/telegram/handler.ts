@@ -534,7 +534,7 @@ async function sendStats(chatId: number, _userId?: number) {
 async function buildStartView(userId: number) {
   const settings = await getSettings();
   const me = await getMe();
-  const text =
+  let text =
     `🎬 <b>בוט חיפוש סרטים</b>\n\n` +
     `🔍 כדי לחפש סרט — פשוט <b>שלח לי את שם הסרט</b> בהודעה כאן בצ׳אט.\n` +
     `לדוגמה: <code>הארי פוטר</code> או <code>Inception</code>\n\n` +
@@ -542,6 +542,13 @@ async function buildStartView(userId: number) {
     `📚 אם יש הרבה תוצאות — אפשר לדפדף בעמודים בעזרת הכפתורים למטה.\n\n` +
     `💡 ניתן גם להוסיף אותי לקבוצות ולחפש שם.`;
   const kb = startMenuKeyboard(settings, me.username);
+  if (settings.quota_enabled) {
+    const q = await quotaInfo(userId, settings);
+    text += q.premium
+      ? `\n\n💎 <b>פרימיום פעיל</b> — חיפושים ללא הגבלה.`
+      : `\n\n🎟️ נשארו לך היום <b>${Math.max(0, q.limit - q.used)}</b> מתוך <b>${q.limit}</b> חיפושים חינם.`;
+    kb.inline_keyboard.unshift([{ text: "🎟️ החיפושים שלי", callback_data: "quota_menu" }]);
+  }
   if (await isAdmin(userId)) {
     kb.inline_keyboard.unshift([{ text: "⚙️ לוח אדמין", callback_data: "admin_open" }]);
   }

@@ -849,17 +849,6 @@ async function handleCallback(cq: any) {
     return;
   }
 
-  if (data === "__never_support_menu") {
-    await answerCallbackQuery(cq.id);
-    await editMessageText(
-      chatId,
-      msg.message_id,
-      `❤️ <b>תמיכה בבוט</b>\n\nתודה רבה על השיקול לתמוך! בחר את סכום הכוכבים:`,
-      { reply_markup: supportMenuKeyboard() },
-    ).catch(() => {});
-    return;
-  }
-
   if (data.startsWith("donate_")) {
     const amount = parseInt(data.slice("donate_".length), 10);
     if (!STAR_AMOUNTS.includes(amount)) return answerCallbackQuery(cq.id, { text: "סכום לא חוקי", show_alert: true });

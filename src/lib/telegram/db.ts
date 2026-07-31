@@ -23,6 +23,11 @@ export interface BotSettings {
   builder_username: string | null;
   search_group_url: string | null;
   search_group_title: string | null;
+  quota_enabled: boolean;
+  free_searches_per_day: number;
+  price_single_search: number;
+  price_daily_extra: number;
+  price_premium: number;
 }
 
 export async function getSettings(): Promise<BotSettings> {

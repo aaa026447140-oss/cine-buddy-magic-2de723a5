@@ -729,6 +729,28 @@ export async function searchesUsedToday(telegram_id: number): Promise<number> {
   return Number((data as any)?.used ?? 0);
 }
 
+/** Which of the given user IDs currently have premium. */
+export async function premiumIdsAmong(ids: number[]): Promise<Set<number>> {
+  if (!ids.length) return new Set();
+  const { data } = await admin()
+    .from("user_entitlements")
+    .select("telegram_id,is_premium")
+    .in("telegram_id", ids)
+    .eq("is_premium", true);
+  return new Set(((data ?? []) as any[]).map((r) => Number(r.telegram_id)));
+}
+
+async function _unusedSearchesUsedToday(telegram_id: number): Promise<number> {
+  const day = new Date().toISOString().slice(0, 10);
+  const { data } = await admin()
+    .from("search_usage")
+    .select("used")
+    .eq("telegram_id", telegram_id)
+    .eq("day", day)
+    .maybeSingle();
+  return Number((data as any)?.used ?? 0);
+}
+
 /** Atomically consume one search against the daily limit / one-off credits. */
 export async function consumeSearch(telegram_id: number, limit: number): Promise<{ allowed: boolean; used: number }> {
   const { data, error } = await admin().rpc("consume_search", { _telegram_id: telegram_id, _limit: limit });

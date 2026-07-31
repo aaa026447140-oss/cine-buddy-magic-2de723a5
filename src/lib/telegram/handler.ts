@@ -959,8 +959,35 @@ async function handleAdminCallback(cq: any, data: string) {
       data.startsWith("admin_req_") ||
       data === "admin_manage" ||
       data === "admin_add" ||
+      data === "admin_quota" ||
+      data.startsWith("admin_q_") ||
       data.startsWith("admin_rm_"))
   ) {
+    return;
+  }
+
+  // Search quota / pricing management (main admin only)
+  if (data === "admin_quota" || data.startsWith("admin_q_")) {
+    const s = await getSettings();
+    if (data === "admin_quota") {
+      return await renderQuotaAdmin(chatId, messageId, s);
+    }
+    if (data === "admin_q_toggle") {
+      await updateSettings({ quota_enabled: !s.quota_enabled } as any);
+      return await renderQuotaAdmin(chatId, messageId, await getSettings());
+    }
+    const prompts: Record<string, string> = {
+      admin_q_free: "🔢 שלח את מספר החיפושים החינמיים ליום (0 = ללא חינם):",
+      admin_q_p_single: "⚡ שלח את המחיר בכוכבים לחיפוש נוסף חד־פעמי:",
+      admin_q_p_daily: "📅 שלח את המחיר בכוכבים לתוספת קבועה של חיפוש בכל יום:",
+      admin_q_p_premium: "💎 שלח את המחיר בכוכבים לפרימיום (ללא הגבלה):",
+      admin_q_grant: "💎 שלח את מזהה המשתמש (ID) שיקבל פרימיום:",
+      admin_q_revoke: "🚫 שלח את מזהה המשתמש (ID) שממנו יוסר הפרימיום:",
+    };
+    if (prompts[data]) {
+      await setAdminState(Number(userId), data);
+      return await sendMessage(chatId, `${prompts[data]}\n\nלביטול שלח /cancel`).then(() => {}).catch(() => {});
+    }
     return;
   }
 

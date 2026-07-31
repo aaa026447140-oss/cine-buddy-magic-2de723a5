@@ -56,6 +56,15 @@ import {
   upsertGroup,
   upsertUser,
   userStars,
+  touchGroupMember,
+  uniqueReach,
+  getEntitlements,
+  addBonusDaily,
+  addExtraCredits,
+  setPremium,
+  registerReferral,
+  searchesUsedToday,
+  consumeSearch,
   type BotSettings,
   type BotUserRow,
 } from "./db";
@@ -70,6 +79,8 @@ import {
   startMenuKeyboard,
   subscribeRequiredKeyboard,
   supportMenuKeyboard,
+  quotaMenuKeyboard,
+  quotaAdminKeyboard,
 } from "./keyboards";
 
 let _me: { id: number; username: string } | null = null;

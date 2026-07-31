@@ -64,6 +64,7 @@ import {
   setPremium,
   registerReferral,
   searchesUsedToday,
+  premiumIdsAmong,
   consumeSearch,
   type BotSettings,
   type BotUserRow,

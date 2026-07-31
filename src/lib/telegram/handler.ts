@@ -540,6 +540,11 @@ async function handleCallback(cq: any) {
 
   if (data === "show_stats") {
     await answerCallbackQuery(cq.id);
+    // Show an immediate loading state so a single click always reacts,
+    // then replace it with the live numbers when the count query returns.
+    await editMessageText(chatId, msg.message_id, "📊 בודק כמה סרטים יש במאגר...", {
+      reply_markup: { inline_keyboard: [[{ text: "« חזרה", callback_data: "back_to_start" }]] },
+    }).catch(() => {});
     const v = await buildStatsView();
     await editMessageText(chatId, msg.message_id, v.text, { reply_markup: v.reply_markup }).catch(() => {});
     return;

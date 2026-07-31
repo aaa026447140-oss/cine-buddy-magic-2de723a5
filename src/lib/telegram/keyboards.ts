@@ -61,8 +61,7 @@ export function quotaAdminKeyboard(s: BotSettings) {
       [{ text: `⚡ מחיר חיפוש חד־פעמי: ${s.price_single_search} ⭐`, callback_data: "admin_q_p_single" }],
       [{ text: `📅 מחיר חיפוש יומי קבוע: ${s.price_daily_extra} ⭐`, callback_data: "admin_q_p_daily" }],
       [{ text: `💎 מחיר פרימיום: ${s.price_premium} ⭐`, callback_data: "admin_q_p_premium" }],
-      [{ text: "💎 העניק פרימיום למשתמש", callback_data: "admin_q_grant" }],
-      [{ text: "🚫 בטל פרימיום למשתמש", callback_data: "admin_q_revoke" }],
+      [{ text: "💎 ניהול פרימיום למשתמשים", callback_data: "admin_prem:recent:0" }],
       [{ text: "« חזרה", callback_data: "admin_open" }],
     ],
   };

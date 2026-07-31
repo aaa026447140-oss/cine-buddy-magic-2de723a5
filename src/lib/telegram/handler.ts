@@ -64,6 +64,7 @@ import {
   setPremium,
   registerReferral,
   searchesUsedToday,
+  premiumIdsAmong,
   consumeSearch,
   type BotSettings,
   type BotUserRow,
@@ -253,6 +254,16 @@ async function allowSearch(
 }
 
 function quotaText(q: QuotaInfo, s: BotSettings, botUsername: string, userId: number): string {
+  if (!q.enabled) {
+    return (
+      `🎟️ <b>החיפושים שלי</b>\n\n` +
+      `✅ כרגע החיפוש בבוט הוא <b>ללא הגבלה</b> — אין מכסה יומית.\n` +
+      (q.bonus ? `🎁 בונוס קבוע מהזמנות: <b>+${q.bonus}</b> ליום (${q.referrals} הזמנות)\n` : "") +
+      (q.credits ? `⚡ חיפושים חד־פעמיים שנרכשו: <b>${q.credits}</b>\n` : "") +
+      `\n📣 <b>הזמן חברים</b> — כל משתמש חדש שיצטרף דרך הקישור שלך מוסיף לך <b>+1 חיפוש בכל יום</b>, לתמיד.\n` +
+      `🔗 <code>https://t.me/${botUsername}?start=r_${userId}</code>`
+    );
+  }
   if (q.premium) {
     return (
       `💎 <b>פרימיום פעיל</b>\n\n` +
@@ -986,8 +997,6 @@ async function handleAdminCallback(cq: any, data: string) {
       admin_q_p_single: "⚡ שלח את המחיר בכוכבים לחיפוש נוסף חד־פעמי:",
       admin_q_p_daily: "📅 שלח את המחיר בכוכבים לתוספת קבועה של חיפוש בכל יום:",
       admin_q_p_premium: "💎 שלח את המחיר בכוכבים לפרימיום (ללא הגבלה):",
-      admin_q_grant: "💎 שלח את מזהה המשתמש (ID) שיקבל פרימיום:",
-      admin_q_revoke: "🚫 שלח את מזהה המשתמש (ID) שממנו יוסר הפרימיום:",
     };
     if (prompts[data]) {
       await setAdminState(Number(userId), data);
@@ -1155,6 +1164,34 @@ async function handleAdminCallback(cq: any, data: string) {
   if (data === "admin_users") {
     return await renderUsersList(chatId, messageId, { query: "", page: 0, sort: "recent", blockedOnly: false });
   }
+  if (data.startsWith("admin_prem:")) {
+    const [, sort, pageText] = data.split(":");
+    return await renderPremiumList(chatId, messageId, {
+      page: Math.max(0, Number(pageText) || 0),
+      sort: sort === "joined" ? "joined" : "recent",
+    });
+  }
+  if (data === "admin_prem_search") {
+    await setAdminState(userId, "awaiting_prem_search");
+    return await sendMessage(
+      chatId,
+      "🔎 שלח שם משתמש (עם או בלי @), שם, או ID לחיפוש לניהול פרימיום.\nשלח /cancel לביטול.",
+    ).then(() => {}).catch(() => {});
+  }
+  if (data.startsWith("admin_premu_")) {
+    const tid = Number(data.slice("admin_premu_".length));
+    if (Number.isFinite(tid)) return await renderPremiumUser(chatId, messageId, tid);
+  }
+  if (data.startsWith("admin_premtg_")) {
+    const [idText, onText] = data.slice("admin_premtg_".length).split("_");
+    const tid = Number(idText);
+    const on = onText === "1";
+    if (Number.isFinite(tid)) {
+      await setPremium(tid, on).catch(() => {});
+      await sendMessage(tid, on ? "💎 קיבלת פרימיום — חיפושים ללא הגבלה!" : "ℹ️ הפרימיום שלך הוסר.").catch(() => {});
+      return await renderPremiumUser(chatId, messageId, tid);
+    }
+  }
   if (data.startsWith("admin_ul:")) {
     const [, sort, pageText, blockedText] = data.split(":");
     return await renderUsersList(chatId, messageId, {
@@ -1291,12 +1328,7 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
       return;
     }
     await setAdminState(userId, null);
-    if (st.state === "admin_q_grant" || st.state === "admin_q_revoke") {
-      const on = st.state === "admin_q_grant";
-      await setPremium(n, on).catch(() => {});
-      await sendMessage(chatId, on ? `✅ ניתן פרימיום למשתמש <code>${n}</code>` : `✅ הוסר פרימיום מהמשתמש <code>${n}</code>`);
-      await sendMessage(n, on ? "💎 קיבלת פרימיום — חיפושים ללא הגבלה!" : "ℹ️ הפרימיום שלך הוסר.").catch(() => {});
-    } else {
+    {
       const field =
         st.state === "admin_q_free"
           ? "free_searches_per_day"
@@ -1444,6 +1476,21 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
     await sendMessage(
       chatId,
       `✅ נקבעה קבוצת חיפוש: <b>${escapeHtml(customTitle || url)}</b>\n\nעכשיו יופיע כפתור בתפריט הראשי לכל המשתמשים.`,
+    );
+    return;
+  }
+
+  if (st.state === "awaiting_prem_search") {
+    await setAdminState(userId, null);
+    const results = await searchBotUsers(text, 20);
+    const kb: any[][] = await premiumUserRows(results);
+    kb.push([{ text: "🔎 חיפוש נוסף", callback_data: "admin_prem_search" }]);
+    kb.push([{ text: "« חזרה", callback_data: "admin_prem:recent:0" }]);
+    await sendMessage(
+      chatId,
+      `💎 <b>ניהול פרימיום — תוצאות חיפוש</b>\n"<code>${escapeHtml(text)}</code>" · ${results.length} תוצאות\n\n` +
+        (results.length ? "לחץ על משתמש כדי להעניק או להסיר פרימיום." : "<i>לא נמצאו משתמשים.</i>"),
+      { reply_markup: { inline_keyboard: kb } },
     );
     return;
   }
@@ -1632,6 +1679,79 @@ async function renderUsersList(
 }
 
 async function renderUserView(chatId: number, messageId: number, telegramId: number) {
+  return await renderUserViewImpl(chatId, messageId, telegramId);
+}
+
+const PREMIUM_PAGE_SIZE = 8;
+
+async function premiumUserRows(users: BotUserRow[]) {
+  const prem = await premiumIdsAmong(users.map((u) => Number(u.telegram_id))).catch(() => new Set<number>());
+  return users.map((u) => [
+    {
+      text: `${prem.has(Number(u.telegram_id)) ? "💎 " : "▫️ "}${truncateBtn(displayUserName(u), 38)} · ${u.telegram_id}`,
+      callback_data: `admin_premu_${u.telegram_id}`,
+    },
+  ]);
+}
+
+async function renderPremiumList(
+  chatId: number,
+  messageId: number,
+  opts: { page: number; sort: "joined" | "recent" },
+) {
+  const { rows, total } = await listUsersPaged({
+    page: opts.page,
+    pageSize: PREMIUM_PAGE_SIZE,
+    sort: opts.sort,
+  });
+  const totalPages = Math.max(1, Math.ceil(total / PREMIUM_PAGE_SIZE));
+  const sortLabel = opts.sort === "joined" ? "לפי סדר הצטרפות" : "לפי שימוש אחרון";
+  const header =
+    `💎 <b>ניהול פרימיום</b>\nסה״כ משתמשים: <b>${total.toLocaleString()}</b> · ${sortLabel}\nעמוד ${opts.page + 1}/${totalPages}`;
+  const kb: any[][] = await premiumUserRows(rows);
+  const nav: any[] = [];
+  if (opts.page > 0) nav.push({ text: "⬅️ הקודם", callback_data: `admin_prem:${opts.sort}:${opts.page - 1}` });
+  nav.push({ text: `${opts.page + 1}/${totalPages}`, callback_data: "noop" });
+  if (opts.page < totalPages - 1) nav.push({ text: "הבא ➡️", callback_data: `admin_prem:${opts.sort}:${opts.page + 1}` });
+  if (nav.length > 1) kb.push(nav);
+  kb.push([
+    { text: `${opts.sort === "joined" ? "✅ " : ""}📅 סדר הצטרפות`, callback_data: "admin_prem:joined:0" },
+    { text: `${opts.sort === "recent" ? "✅ " : ""}🕓 שימוש אחרון`, callback_data: "admin_prem:recent:0" },
+  ]);
+  kb.push([{ text: "🔎 חיפוש לפי שם או ID", callback_data: "admin_prem_search" }]);
+  kb.push([{ text: "« חזרה", callback_data: "admin_quota" }]);
+  await editMessageText(chatId, messageId, `${header}\n\nלחץ על משתמש כדי להעניק או להסיר פרימיום.`, {
+    reply_markup: { inline_keyboard: kb },
+  }).catch(() => {});
+}
+
+async function renderPremiumUser(chatId: number, messageId: number, telegramId: number) {
+  const u = await getBotUser(telegramId);
+  const ent = await getEntitlements(telegramId).catch(() => null);
+  const isPrem = !!ent?.is_premium;
+  const name = u ? escapeHtml(displayUserName(u)) : String(telegramId);
+  const text =
+    `👤 <b>${name}</b>\n\n` +
+    `🆔 ID: <code>${telegramId}</code>\n` +
+    (u?.username ? `📛 שם משתמש: @${escapeHtml(u.username)}\n` : "") +
+    `💎 פרימיום: <b>${isPrem ? "פעיל" : "לא פעיל"}</b>\n` +
+    `🎁 בונוס יומי קבוע: <b>${ent?.bonus_daily ?? 0}</b>\n` +
+    `⚡ חיפושים חד־פעמיים: <b>${ent?.extra_credits ?? 0}</b>`;
+  await editMessageText(chatId, messageId, text, {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          isPrem
+            ? { text: "🚫 הסר פרימיום", callback_data: `admin_premtg_${telegramId}_0` }
+            : { text: "💎 העניק פרימיום", callback_data: `admin_premtg_${telegramId}_1` },
+        ],
+        [{ text: "« חזרה לרשימה", callback_data: "admin_prem:recent:0" }],
+      ],
+    },
+  }).catch(() => {});
+}
+
+async function renderUserViewImpl(chatId: number, messageId: number, telegramId: number) {
   const u = await getBotUser(telegramId);
   if (!u) {
     await editMessageText(chatId, messageId, "❌ המשתמש לא נמצא במאגר.", {

@@ -159,6 +159,9 @@ export function adminPanelKeyboard(isMain: boolean) {
     rows.push([{ text: "🔒 ניהול ערוצי חובה", callback_data: "admin_required" }]);
   }
   rows.push([{ text: "🔎 הגדרת קבוצת חיפוש", callback_data: "admin_set_search_group" }]);
+  if (isMain) {
+    rows.push([{ text: "🎟️ ניהול חיפושים ומחירים", callback_data: "admin_quota" }]);
+  }
   rows.push([{ text: "📊 סטטיסטיקות", callback_data: "admin_stats" }]);
   rows.push([
     { text: "👤 משתמשים", callback_data: "admin_users" },

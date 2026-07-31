@@ -1267,6 +1267,10 @@ async function handleAdminCallback(cq: any, data: string) {
     const tid = Number(data.slice("admin_user_".length));
     if (Number.isFinite(tid)) return await renderUserView(chatId, messageId, tid);
   }
+  if (data.startsWith("admin_uhist_")) {
+    const tid = Number(data.slice("admin_uhist_".length));
+    if (Number.isFinite(tid)) return await renderSearchHistory(chatId, messageId, tid);
+  }
   if (data.startsWith("admin_ublk_")) {
     const tid = Number(data.slice("admin_ublk_".length));
     if (Number.isFinite(tid)) {
@@ -1687,7 +1691,9 @@ async function renderUsersList(
     : "<i>לא נמצאו משתמשים.</i>";
   const kb: any[][] = results.map((u) => [
     {
-      text: `${u.is_blocked ? "🚫 " : ""}${truncateBtn(displayUserName(u), 40)} · ${u.telegram_id}`,
+      text:
+        `${u.is_blocked ? "🚫 " : ""}${truncateBtn(displayUserName(u), 34)} · ${u.telegram_id}` +
+        (opts.blockedOnly ? ` · ${u.blocked_until ? formatWhen(u.blocked_until).split(",")[0] : "לצמיתות"}` : ""),
       callback_data: `admin_user_${u.telegram_id}`,
     },
   ]);
@@ -1790,6 +1796,21 @@ async function renderPremiumUser(chatId: number, messageId: number, telegramId: 
   }).catch(() => {});
 }
 
+async function renderSearchHistory(chatId: number, messageId: number, telegramId: number) {
+  const u = await getBotUser(telegramId).catch(() => null);
+  const rows = await lastSearches(telegramId, 15).catch(() => []);
+  const name = u ? escapeHtml(displayUserName(u)) : String(telegramId);
+  const body = rows.length
+    ? rows.map((r, i) => `${i + 1}. <code>${escapeHtml(r.query)}</code>\n   ${formatWhen(r.created_at)}`).join("\n")
+    : "<i>אין חיפושים שמורים.</i>";
+  await editMessageText(
+    chatId,
+    messageId,
+    `📜 <b>15 החיפושים האחרונים</b>\n👤 ${name} · <code>${telegramId}</code>\n\n${body}`,
+    { reply_markup: { inline_keyboard: [[{ text: "« חזרה למשתמש", callback_data: `admin_user_${telegramId}` }]] } },
+  ).catch(() => {});
+}
+
 async function renderUserViewImpl(chatId: number, messageId: number, telegramId: number) {
   const u = await getBotUser(telegramId);
   if (!u) {
@@ -1799,6 +1820,7 @@ async function renderUserViewImpl(chatId: number, messageId: number, telegramId:
     return;
   }
   const stars = await userStars(telegramId).catch(() => 0);
+  const recent = await lastSearches(telegramId, 1).catch(() => []);
   const name = escapeHtml(displayUserName(u));
   const full = [u.first_name, u.last_name].filter(Boolean).join(" ").trim();
   const text =
@@ -1809,7 +1831,14 @@ async function renderUserViewImpl(chatId: number, messageId: number, telegramId:
     `📅 הצטרף: ${new Date(u.first_seen).toLocaleString("he-IL")}\n` +
     `🕓 נראה לאחרונה: ${new Date(u.last_seen).toLocaleString("he-IL")}\n` +
     `⭐ תרומות בכוכבים: <b>${stars.toLocaleString()}</b>\n` +
-    `סטטוס: ${u.is_blocked ? "🚫 חסום" : "✅ פעיל"}`;
+    `⭐ תרומות בכוכבים: <b>${stars.toLocaleString()}</b>\n`.slice(0, 0) +
+    `🔍 חיפוש אחרון: ${recent[0] ? `<code>${escapeHtml(recent[0].query)}</code> · ${formatWhen(recent[0].created_at)}` : "—"}\n` +
+    `סטטוס: ${u.is_blocked ? "🚫 חסום" : "✅ פעיל"}` +
+    (u.is_blocked
+      ? `\nסיבה: ${escapeHtml(u.block_reason || "חסימה ידנית")}` +
+        `\nמשתחרר: ${u.blocked_until ? formatWhen(u.blocked_until) : "לצמיתות (עד שחרור ידני)"}` +
+        (u.block_strikes ? `\nעבירות: ${u.block_strikes}` : "")
+      : "");
   const actionBtn = u.is_blocked
     ? { text: "✅ בטל חסימה", callback_data: `admin_uunblk_${u.telegram_id}` }
     : { text: "🚫 חסום משתמש", callback_data: `admin_ublk_${u.telegram_id}` };
@@ -1817,6 +1846,7 @@ async function renderUserViewImpl(chatId: number, messageId: number, telegramId:
     reply_markup: {
       inline_keyboard: [
         [actionBtn],
+        [{ text: "📜 היסטוריית חיפושים", callback_data: `admin_uhist_${u.telegram_id}` }],
         [{ text: "« חזרה לרשימה", callback_data: "admin_users" }],
       ],
     },

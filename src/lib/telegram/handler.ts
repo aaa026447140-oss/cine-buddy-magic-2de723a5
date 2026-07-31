@@ -1153,6 +1153,34 @@ async function handleAdminCallback(cq: any, data: string) {
   if (data === "admin_users") {
     return await renderUsersList(chatId, messageId, { query: "", page: 0, sort: "recent", blockedOnly: false });
   }
+  if (data.startsWith("admin_prem:")) {
+    const [, sort, pageText] = data.split(":");
+    return await renderPremiumList(chatId, messageId, {
+      page: Math.max(0, Number(pageText) || 0),
+      sort: sort === "joined" ? "joined" : "recent",
+    });
+  }
+  if (data === "admin_prem_search") {
+    await setAdminState(userId, "awaiting_prem_search");
+    return await sendMessage(
+      chatId,
+      "🔎 שלח שם משתמש (עם או בלי @), שם, או ID לחיפוש לניהול פרימיום.\nשלח /cancel לביטול.",
+    ).then(() => {}).catch(() => {});
+  }
+  if (data.startsWith("admin_premu_")) {
+    const tid = Number(data.slice("admin_premu_".length));
+    if (Number.isFinite(tid)) return await renderPremiumUser(chatId, messageId, tid);
+  }
+  if (data.startsWith("admin_premtg_")) {
+    const [idText, onText] = data.slice("admin_premtg_".length).split("_");
+    const tid = Number(idText);
+    const on = onText === "1";
+    if (Number.isFinite(tid)) {
+      await setPremium(tid, on).catch(() => {});
+      await sendMessage(tid, on ? "💎 קיבלת פרימיום — חיפושים ללא הגבלה!" : "ℹ️ הפרימיום שלך הוסר.").catch(() => {});
+      return await renderPremiumUser(chatId, messageId, tid);
+    }
+  }
   if (data.startsWith("admin_ul:")) {
     const [, sort, pageText, blockedText] = data.split(":");
     return await renderUsersList(chatId, messageId, {

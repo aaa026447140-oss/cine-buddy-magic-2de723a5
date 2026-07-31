@@ -12,6 +12,7 @@ import {
   tg,
 } from "./api";
 import { ADMIN_ID, PAGE_SIZE, STAR_AMOUNTS } from "./constants";
+import { formatDuration, formatWhen, isInappropriateQuery } from "./moderation";
 import {
   addAdmin,
   addSourceChannel,
@@ -29,6 +30,10 @@ import {
   getCachedSearchAll,
   getAdminState,
   getBotUser,
+  applyAutoBlock,
+  releaseIfExpired,
+  logSearch,
+  lastSearches,
   getMovieById,
   getSettings,
   indexMovie,
@@ -398,10 +403,11 @@ async function handleMessage(msg: any) {
       if (text.length < 2) return;
       // Blocked user in a group: silently ignore search attempts, but notify them.
       const bu = await getBotUser(Number(from.id)).catch(() => null);
-      if (bu?.is_blocked) {
-        await sendMessage(chat.id, "🚫 אתה חסום פנה למנהל", { reply_to_message_id: msg.message_id } as any).catch(() => {});
+      if (bu?.is_blocked && !(await releaseIfExpired(bu).catch(() => false))) {
+        await sendMessage(chat.id, blockedNotice(bu), { reply_to_message_id: msg.message_id } as any).catch(() => {});
         return;
       }
+      if (await moderationGate(chat.id, Number(from.id), text, msg.message_id)) return;
       // Require bot admin+can_invite_users permission in the group before serving results.
       const perm = await checkGroupPermissions(chat.id).catch(() => ({ ok: true } as any));
       if (!perm.ok) {
@@ -410,6 +416,7 @@ async function handleMessage(msg: any) {
       }
       const settings = await getSettings();
       if (!(await allowSearch(Number(chat.id), Number(from.id), settings, true, msg.message_id))) return;
+      logSearch(Number(from.id), text).catch(() => {});
       await safeRunSearchAndRespond(chat.id, from.id, text, 0, null, true);
     }
     return;
@@ -481,8 +488,10 @@ async function handleMessage(msg: any) {
   {
     const bu = await getBotUser(Number(from.id)).catch(() => null);
     if (bu?.is_blocked && text && !text.startsWith("/start") && text !== "/stats" && text !== "/admin") {
-      await sendMessage(chat.id, "🚫 אתה חסום פנה למנהל").catch(() => {});
-      return;
+      if (!(await releaseIfExpired(bu).catch(() => false))) {
+        await sendMessage(chat.id, blockedNotice(bu)).catch(() => {});
+        return;
+      }
     }
   }
 
@@ -523,10 +532,40 @@ async function handleMessage(msg: any) {
 
   // Free-text search in private
   if (text && !text.startsWith("/")) {
+    if (await moderationGate(chat.id, Number(from.id), text)) return;
     const settings = await getSettings();
     if (!(await allowSearch(chat.id, Number(from.id), settings, false))) return;
+    logSearch(Number(from.id), text).catch(() => {});
     return await safeRunSearchAndRespond(chat.id, Number(from.id), text, 0, null, false);
   }
+}
+
+/** Message shown to an already-blocked user, including release time. */
+function blockedNotice(u: { blocked_until?: string | null; block_reason?: string | null }) {
+  if (!u.blocked_until) return "🚫 אתה חסום לצמיתות. פנה למנהל.";
+  return (
+    "🚫 אתה חסום כרגע.\n" +
+    (u.block_reason ? `סיבה: ${u.block_reason}\n` : "") +
+    `תשוחרר: ${formatWhen(u.blocked_until)}`
+  );
+}
+
+/**
+ * Blocks a user who searched inappropriate content, escalating the duration on
+ * each offence (5m → 15m → 30m → 1d → 2d → week → permanent).
+ * Returns true when the search must not proceed.
+ */
+async function moderationGate(chatId: number, userId: number, query: string, replyTo?: number) {
+  if (!isInappropriateQuery(query)) return false;
+  const r = await applyAutoBlock(userId, "חיפוש לא הולם").catch(() => null);
+  const text = r
+    ? "🚫 נחסמת עקב חיפוש לא הולם.\n" +
+      (r.minutes
+        ? `משך החסימה: ${formatDuration(r.minutes)}\nתשוחרר: ${formatWhen(r.until!)}`
+        : "החסימה היא לצמיתות.")
+    : "🚫 נחסמת עקב חיפוש לא הולם.";
+  await sendMessage(chatId, text, replyTo ? ({ reply_to_message_id: replyTo } as any) : undefined).catch(() => {});
+  return true;
 }
 
 async function buildStatsView() {
@@ -1228,6 +1267,10 @@ async function handleAdminCallback(cq: any, data: string) {
     const tid = Number(data.slice("admin_user_".length));
     if (Number.isFinite(tid)) return await renderUserView(chatId, messageId, tid);
   }
+  if (data.startsWith("admin_uhist_")) {
+    const tid = Number(data.slice("admin_uhist_".length));
+    if (Number.isFinite(tid)) return await renderSearchHistory(chatId, messageId, tid);
+  }
   if (data.startsWith("admin_ublk_")) {
     const tid = Number(data.slice("admin_ublk_".length));
     if (Number.isFinite(tid)) {
@@ -1648,7 +1691,9 @@ async function renderUsersList(
     : "<i>לא נמצאו משתמשים.</i>";
   const kb: any[][] = results.map((u) => [
     {
-      text: `${u.is_blocked ? "🚫 " : ""}${truncateBtn(displayUserName(u), 40)} · ${u.telegram_id}`,
+      text:
+        `${u.is_blocked ? "🚫 " : ""}${truncateBtn(displayUserName(u), 34)} · ${u.telegram_id}` +
+        (opts.blockedOnly ? ` · ${u.blocked_until ? formatWhen(u.blocked_until).split(",")[0] : "לצמיתות"}` : ""),
       callback_data: `admin_user_${u.telegram_id}`,
     },
   ]);
@@ -1751,6 +1796,21 @@ async function renderPremiumUser(chatId: number, messageId: number, telegramId: 
   }).catch(() => {});
 }
 
+async function renderSearchHistory(chatId: number, messageId: number, telegramId: number) {
+  const u = await getBotUser(telegramId).catch(() => null);
+  const rows = await lastSearches(telegramId, 15).catch(() => []);
+  const name = u ? escapeHtml(displayUserName(u)) : String(telegramId);
+  const body = rows.length
+    ? rows.map((r, i) => `${i + 1}. <code>${escapeHtml(r.query)}</code>\n   ${formatWhen(r.created_at)}`).join("\n")
+    : "<i>אין חיפושים שמורים.</i>";
+  await editMessageText(
+    chatId,
+    messageId,
+    `📜 <b>15 החיפושים האחרונים</b>\n👤 ${name} · <code>${telegramId}</code>\n\n${body}`,
+    { reply_markup: { inline_keyboard: [[{ text: "« חזרה למשתמש", callback_data: `admin_user_${telegramId}` }]] } },
+  ).catch(() => {});
+}
+
 async function renderUserViewImpl(chatId: number, messageId: number, telegramId: number) {
   const u = await getBotUser(telegramId);
   if (!u) {
@@ -1760,6 +1820,7 @@ async function renderUserViewImpl(chatId: number, messageId: number, telegramId:
     return;
   }
   const stars = await userStars(telegramId).catch(() => 0);
+  const recent = await lastSearches(telegramId, 1).catch(() => []);
   const name = escapeHtml(displayUserName(u));
   const full = [u.first_name, u.last_name].filter(Boolean).join(" ").trim();
   const text =
@@ -1770,7 +1831,13 @@ async function renderUserViewImpl(chatId: number, messageId: number, telegramId:
     `📅 הצטרף: ${new Date(u.first_seen).toLocaleString("he-IL")}\n` +
     `🕓 נראה לאחרונה: ${new Date(u.last_seen).toLocaleString("he-IL")}\n` +
     `⭐ תרומות בכוכבים: <b>${stars.toLocaleString()}</b>\n` +
-    `סטטוס: ${u.is_blocked ? "🚫 חסום" : "✅ פעיל"}`;
+    `🔍 חיפוש אחרון: ${recent[0] ? `<code>${escapeHtml(recent[0].query)}</code> · ${formatWhen(recent[0].created_at)}` : "—"}\n` +
+    `סטטוס: ${u.is_blocked ? "🚫 חסום" : "✅ פעיל"}` +
+    (u.is_blocked
+      ? `\nסיבה: ${escapeHtml(u.block_reason || "חסימה ידנית")}` +
+        `\nמשתחרר: ${u.blocked_until ? formatWhen(u.blocked_until) : "לצמיתות (עד שחרור ידני)"}` +
+        (u.block_strikes ? `\nעבירות: ${u.block_strikes}` : "")
+      : "");
   const actionBtn = u.is_blocked
     ? { text: "✅ בטל חסימה", callback_data: `admin_uunblk_${u.telegram_id}` }
     : { text: "🚫 חסום משתמש", callback_data: `admin_ublk_${u.telegram_id}` };
@@ -1778,6 +1845,7 @@ async function renderUserViewImpl(chatId: number, messageId: number, telegramId:
     reply_markup: {
       inline_keyboard: [
         [actionBtn],
+        [{ text: "📜 היסטוריית חיפושים", callback_data: `admin_uhist_${u.telegram_id}` }],
         [{ text: "« חזרה לרשימה", callback_data: "admin_users" }],
       ],
     },

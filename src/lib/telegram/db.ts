@@ -86,7 +86,60 @@ export async function markUserBlocked(telegram_id: number) {
 }
 
 export async function unmarkUserBlocked(telegram_id: number) {
-  await admin().from("bot_users").update({ is_blocked: false }).eq("telegram_id", telegram_id);
+  await admin()
+    .from("bot_users")
+    .update({ is_blocked: false, blocked_until: null, block_reason: null })
+    .eq("telegram_id", telegram_id);
+}
+
+/** Escalating auto-block ladder for inappropriate searches. */
+export const BLOCK_LADDER_MIN = [5, 15, 30, 60 * 24, 60 * 48, 60 * 24 * 7];
+
+/**
+ * Applies the next escalation step for a user caught searching inappropriate
+ * content. Returns the applied duration (null = permanent) and release time.
+ */
+export async function applyAutoBlock(
+  telegram_id: number,
+  reason: string,
+): Promise<{ minutes: number | null; until: string | null; strike: number }> {
+  const u = await getBotUser(telegram_id);
+  const strike = (u?.block_strikes ?? 0) + 1;
+  const minutes = strike <= BLOCK_LADDER_MIN.length ? BLOCK_LADDER_MIN[strike - 1] : null;
+  const until = minutes ? new Date(Date.now() + minutes * 60_000).toISOString() : null;
+  await admin()
+    .from("bot_users")
+    .update({ is_blocked: true, blocked_until: until, block_reason: reason, block_strikes: strike })
+    .eq("telegram_id", telegram_id);
+  return { minutes, until, strike };
+}
+
+/** Clears a temporary block whose time has passed. Returns true if released. */
+export async function releaseIfExpired(u: BotUserRow | null): Promise<boolean> {
+  if (!u?.is_blocked || !u.blocked_until) return false;
+  if (new Date(u.blocked_until).getTime() > Date.now()) return false;
+  await admin()
+    .from("bot_users")
+    .update({ is_blocked: false, blocked_until: null, block_reason: null })
+    .eq("telegram_id", u.telegram_id);
+  return true;
+}
+
+export async function logSearch(telegram_id: number, query: string) {
+  await admin().from("search_log").insert({ telegram_id, query: query.slice(0, 200) } as any);
+}
+
+export async function lastSearches(
+  telegram_id: number,
+  limit = 15,
+): Promise<{ query: string; created_at: string }[]> {
+  const { data } = await admin()
+    .from("search_log")
+    .select("query,created_at")
+    .eq("telegram_id", telegram_id)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  return (data ?? []) as any;
 }
 
 /** Unblock every currently blocked user. Returns how many were released. */
@@ -96,9 +149,15 @@ export async function unblockAllUsers(): Promise<number> {
     .from("bot_users")
     .select("*", { count: "exact", head: true })
     .eq("is_blocked", true);
-  await a.from("bot_users").update({ is_blocked: false }).eq("is_blocked", true);
+  await a
+    .from("bot_users")
+    .update({ is_blocked: false, blocked_until: null, block_reason: null })
+    .eq("is_blocked", true);
   return count ?? 0;
 }
+
+export const USER_COLS =
+  "telegram_id,username,first_name,last_name,is_blocked,first_seen,last_seen,blocked_until,block_reason,block_strikes";
 
 export type BotUserRow = {
   telegram_id: number;
@@ -108,12 +167,15 @@ export type BotUserRow = {
   is_blocked: boolean;
   first_seen: string;
   last_seen: string;
+  blocked_until?: string | null;
+  block_reason?: string | null;
+  block_strikes?: number | null;
 };
 
 export async function searchBotUsers(query: string, limit = 20): Promise<BotUserRow[]> {
   const q = query.trim();
   const a = admin();
-  let req: any = a.from("bot_users").select("telegram_id,username,first_name,last_name,is_blocked,first_seen,last_seen");
+  let req: any = a.from("bot_users").select(USER_COLS);
   if (q) {
     if (/^-?\d+$/.test(q)) {
       req = req.eq("telegram_id", Number(q));
@@ -131,7 +193,7 @@ export async function searchBotUsers(query: string, limit = 20): Promise<BotUser
 export async function getBotUser(telegram_id: number): Promise<BotUserRow | null> {
   const { data } = await admin()
     .from("bot_users")
-    .select("telegram_id,username,first_name,last_name,is_blocked,first_seen,last_seen")
+    .select(USER_COLS)
     .eq("telegram_id", telegram_id)
     .maybeSingle();
   return (data as any) ?? null;
@@ -996,7 +1058,7 @@ export async function listUsersPaged(opts: {
   const from = opts.page * opts.pageSize;
   let req: any = admin()
     .from("bot_users")
-    .select("telegram_id,username,first_name,last_name,is_blocked,first_seen,last_seen", { count: "exact" });
+    .select(USER_COLS, { count: "exact" });
   if (opts.blockedOnly) req = req.eq("is_blocked", true);
   req =
     opts.sort === "joined"

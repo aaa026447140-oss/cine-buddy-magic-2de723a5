@@ -178,6 +178,9 @@ export type Database = {
       }
       bot_users: {
         Row: {
+          block_reason: string | null
+          block_strikes: number
+          blocked_until: string | null
           first_name: string | null
           first_seen: string
           is_blocked: boolean
@@ -188,6 +191,9 @@ export type Database = {
           username: string | null
         }
         Insert: {
+          block_reason?: string | null
+          block_strikes?: number
+          blocked_until?: string | null
           first_name?: string | null
           first_seen?: string
           is_blocked?: boolean
@@ -198,6 +204,9 @@ export type Database = {
           username?: string | null
         }
         Update: {
+          block_reason?: string | null
+          block_strikes?: number
+          blocked_until?: string | null
           first_name?: string | null
           first_seen?: string
           is_blocked?: boolean
@@ -407,6 +416,27 @@ export type Database = {
           kind?: string
           title?: string | null
           username?: string | null
+        }
+        Relationships: []
+      }
+      search_log: {
+        Row: {
+          created_at: string
+          id: number
+          query: string
+          telegram_id: number
+        }
+        Insert: {
+          created_at?: string
+          id?: number
+          query: string
+          telegram_id: number
+        }
+        Update: {
+          created_at?: string
+          id?: number
+          query?: string
+          telegram_id?: number
         }
         Relationships: []
       }

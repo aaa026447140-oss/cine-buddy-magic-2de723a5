@@ -986,8 +986,6 @@ async function handleAdminCallback(cq: any, data: string) {
       admin_q_p_single: "⚡ שלח את המחיר בכוכבים לחיפוש נוסף חד־פעמי:",
       admin_q_p_daily: "📅 שלח את המחיר בכוכבים לתוספת קבועה של חיפוש בכל יום:",
       admin_q_p_premium: "💎 שלח את המחיר בכוכבים לפרימיום (ללא הגבלה):",
-      admin_q_grant: "💎 שלח את מזהה המשתמש (ID) שיקבל פרימיום:",
-      admin_q_revoke: "🚫 שלח את מזהה המשתמש (ID) שממנו יוסר הפרימיום:",
     };
     if (prompts[data]) {
       await setAdminState(Number(userId), data);

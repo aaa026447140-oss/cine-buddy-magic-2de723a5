@@ -254,6 +254,16 @@ async function allowSearch(
 }
 
 function quotaText(q: QuotaInfo, s: BotSettings, botUsername: string, userId: number): string {
+  if (!q.enabled) {
+    return (
+      `🎟️ <b>החיפושים שלי</b>\n\n` +
+      `✅ כרגע החיפוש בבוט הוא <b>ללא הגבלה</b> — אין מכסה יומית.\n` +
+      (q.bonus ? `🎁 בונוס קבוע מהזמנות: <b>+${q.bonus}</b> ליום (${q.referrals} הזמנות)\n` : "") +
+      (q.credits ? `⚡ חיפושים חד־פעמיים שנרכשו: <b>${q.credits}</b>\n` : "") +
+      `\n📣 <b>הזמן חברים</b> — כל משתמש חדש שיצטרף דרך הקישור שלך מוסיף לך <b>+1 חיפוש בכל יום</b>, לתמיד.\n` +
+      `🔗 <code>https://t.me/${botUsername}?start=r_${userId}</code>`
+    );
+  }
   if (q.premium) {
     return (
       `💎 <b>פרימיום פעיל</b>\n\n` +

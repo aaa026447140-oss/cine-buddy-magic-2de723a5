@@ -1653,6 +1653,79 @@ async function renderUsersList(
 }
 
 async function renderUserView(chatId: number, messageId: number, telegramId: number) {
+  return await renderUserViewImpl(chatId, messageId, telegramId);
+}
+
+const PREMIUM_PAGE_SIZE = 8;
+
+async function premiumUserRows(users: BotUserRow[]) {
+  const prem = await premiumIdsAmong(users.map((u) => Number(u.telegram_id))).catch(() => new Set<number>());
+  return users.map((u) => [
+    {
+      text: `${prem.has(Number(u.telegram_id)) ? "💎 " : "▫️ "}${truncateBtn(displayUserName(u), 38)} · ${u.telegram_id}`,
+      callback_data: `admin_premu_${u.telegram_id}`,
+    },
+  ]);
+}
+
+async function renderPremiumList(
+  chatId: number,
+  messageId: number,
+  opts: { page: number; sort: "joined" | "recent" },
+) {
+  const { rows, total } = await listUsersPaged({
+    page: opts.page,
+    pageSize: PREMIUM_PAGE_SIZE,
+    sort: opts.sort,
+  });
+  const totalPages = Math.max(1, Math.ceil(total / PREMIUM_PAGE_SIZE));
+  const sortLabel = opts.sort === "joined" ? "לפי סדר הצטרפות" : "לפי שימוש אחרון";
+  const header =
+    `💎 <b>ניהול פרימיום</b>\nסה״כ משתמשים: <b>${total.toLocaleString()}</b> · ${sortLabel}\nעמוד ${opts.page + 1}/${totalPages}`;
+  const kb: any[][] = await premiumUserRows(rows);
+  const nav: any[] = [];
+  if (opts.page > 0) nav.push({ text: "⬅️ הקודם", callback_data: `admin_prem:${opts.sort}:${opts.page - 1}` });
+  nav.push({ text: `${opts.page + 1}/${totalPages}`, callback_data: "noop" });
+  if (opts.page < totalPages - 1) nav.push({ text: "הבא ➡️", callback_data: `admin_prem:${opts.sort}:${opts.page + 1}` });
+  if (nav.length > 1) kb.push(nav);
+  kb.push([
+    { text: `${opts.sort === "joined" ? "✅ " : ""}📅 סדר הצטרפות`, callback_data: "admin_prem:joined:0" },
+    { text: `${opts.sort === "recent" ? "✅ " : ""}🕓 שימוש אחרון`, callback_data: "admin_prem:recent:0" },
+  ]);
+  kb.push([{ text: "🔎 חיפוש לפי שם או ID", callback_data: "admin_prem_search" }]);
+  kb.push([{ text: "« חזרה", callback_data: "admin_quota" }]);
+  await editMessageText(chatId, messageId, `${header}\n\nלחץ על משתמש כדי להעניק או להסיר פרימיום.`, {
+    reply_markup: { inline_keyboard: kb },
+  }).catch(() => {});
+}
+
+async function renderPremiumUser(chatId: number, messageId: number, telegramId: number) {
+  const u = await getBotUser(telegramId);
+  const ent = await getEntitlements(telegramId).catch(() => null);
+  const isPrem = !!ent?.is_premium;
+  const name = u ? escapeHtml(displayUserName(u)) : String(telegramId);
+  const text =
+    `👤 <b>${name}</b>\n\n` +
+    `🆔 ID: <code>${telegramId}</code>\n` +
+    (u?.username ? `📛 שם משתמש: @${escapeHtml(u.username)}\n` : "") +
+    `💎 פרימיום: <b>${isPrem ? "פעיל" : "לא פעיל"}</b>\n` +
+    `🎁 בונוס יומי קבוע: <b>${ent?.bonus_daily ?? 0}</b>\n` +
+    `⚡ חיפושים חד־פעמיים: <b>${ent?.extra_credits ?? 0}</b>`;
+  await editMessageText(chatId, messageId, text, {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          isPrem
+            ? { text: "🚫 הסר פרימיום", callback_data: `admin_premtg_${telegramId}_0` }
+            : { text: "💎 העניק פרימיום", callback_data: `admin_premtg_${telegramId}_1` },
+        ],
+        [{ text: "« חזרה לרשימה", callback_data: "admin_prem:recent:0" }],
+      ],
+    },
+  }).catch(() => {});
+}
+
+async function renderUserViewImpl(chatId: number, messageId: number, telegramId: number) {
   const u = await getBotUser(telegramId);
   if (!u) {
     await editMessageText(chatId, messageId, "❌ המשתמש לא נמצא במאגר.", {

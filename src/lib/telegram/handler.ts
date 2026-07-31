@@ -363,6 +363,7 @@ async function handleMessage(msg: any) {
   // Group: track membership and handle search by text
   if (chat.type === "group" || chat.type === "supergroup") {
     await upsertGroup({ id: Number(chat.id), title: chat.title, type: chat.type });
+    touchGroupMember(Number(chat.id), Number(from.id)).catch(() => {});
     if (msg.text) {
       // Treat any text starting with "?" or any text that isn't a command as a search.
       const text = msg.text.trim();
@@ -398,13 +399,28 @@ async function handleMessage(msg: any) {
   // Successful payment notification
   if (msg.successful_payment) {
     const sp = msg.successful_payment;
+    const payload: string = sp.invoice_payload || "";
     await recordPayment({
       telegram_user_id: Number(from.id),
       stars_amount: Number(sp.total_amount),
       telegram_payment_charge_id: sp.telegram_payment_charge_id,
       telegram_provider_charge_id: sp.provider_payment_charge_id || "",
-      payload: sp.invoice_payload,
+      payload,
     });
+    if (payload.startsWith("buy:")) {
+      const kind = payload.split(":")[1];
+      if (kind === "single") {
+        await addExtraCredits(Number(from.id), 1).catch(() => {});
+        await sendMessage(chat.id, "⚡ נוסף לך חיפוש נוסף חד־פעמי. תודה! ❤️");
+      } else if (kind === "daily") {
+        await addBonusDaily(Number(from.id), 1).catch(() => {});
+        await sendMessage(chat.id, "📅 מעכשיו יש לך +1 חיפוש בכל יום, לתמיד. תודה! ❤️");
+      } else if (kind === "premium") {
+        await setPremium(Number(from.id), true).catch(() => {});
+        await sendMessage(chat.id, "💎 הפרימיום הופעל! חיפושים ללא הגבלה. תודה! ❤️");
+      }
+      return;
+    }
     await sendMessage(chat.id, `🙏 תודה רבה על התמיכה! קיבלנו ${sp.total_amount} ⭐`);
     return;
   }
@@ -449,6 +465,22 @@ async function handleMessage(msg: any) {
       const movieId = Number(payload.slice(2));
       return await serveMovie(chat.id, Number(from.id), movieId);
     }
+    if (payload.startsWith("r_")) {
+      const referrer = Number(payload.slice(2));
+      if (Number.isFinite(referrer) && referrer !== Number(from.id)) {
+        const ok = await registerReferral(Number(from.id), referrer).catch(() => false);
+        if (ok) {
+          const settings = await getSettings();
+          if (settings.quota_enabled) {
+            await sendMessage(referrer, "🎉 מישהו הצטרף דרך הקישור שלך — קיבלת +1 חיפוש בכל יום!").catch(() => {});
+          }
+        }
+      }
+      return await sendStartMenu(chat.id, Number(from.id));
+    }
+    if (payload === "quota") {
+      return await sendQuotaMenu(chat.id, Number(from.id));
+    }
     return await sendStartMenu(chat.id, Number(from.id));
   }
 
@@ -462,6 +494,8 @@ async function handleMessage(msg: any) {
 
   // Free-text search in private
   if (text && !text.startsWith("/")) {
+    const settings = await getSettings();
+    if (!(await allowSearch(chat.id, Number(from.id), settings, false))) return;
     return await safeRunSearchAndRespond(chat.id, Number(from.id), text, 0, null, false);
   }
 }

@@ -609,6 +609,134 @@ export async function listUsers(): Promise<number[]> {
   return (data ?? []).map((r: any) => Number(r.telegram_id));
 }
 
+// ───── Group membership tracking (used to de-duplicate audience numbers) ─────
+export async function touchGroupMember(chat_id: number, user_id: number) {
+  await admin()
+    .from("group_members")
+    .upsert({ chat_id, user_id, last_seen: new Date().toISOString() }, { onConflict: "chat_id,user_id" });
+}
+
+/**
+ * Unique audience: group members + private users, counting a person who is
+ * both a group member and a private user only once.
+ * Overlap is measured on users we actually identified inside groups.
+ */
+export async function uniqueReach(totalGroupMembers: number, privateUserIds: number[]) {
+  const a = admin();
+  const { data: known } = await a.from("group_members").select("user_id");
+  const knownGroupUsers = new Set<number>((known ?? []).map((r: any) => Number(r.user_id)));
+  const privateSet = new Set<number>(privateUserIds);
+  let overlap = 0;
+  for (const id of knownGroupUsers) if (privateSet.has(id)) overlap++;
+  const totalPrivate = privateSet.size;
+  const unique = Math.max(totalGroupMembers, totalGroupMembers + totalPrivate - overlap);
+  return { totalGroupMembers, totalPrivate, overlap, unique };
+}
+
+// ───── Search quota / entitlements ─────
+export type Entitlements = {
+  telegram_id: number;
+  bonus_daily: number;
+  extra_credits: number;
+  is_premium: boolean;
+  referred_by: number | null;
+  referrals_count: number;
+};
+
+export async function getEntitlements(telegram_id: number): Promise<Entitlements> {
+  const { data } = await admin()
+    .from("user_entitlements")
+    .select("telegram_id,bonus_daily,extra_credits,is_premium,referred_by,referrals_count")
+    .eq("telegram_id", telegram_id)
+    .maybeSingle();
+  return (
+    (data as any) ?? {
+      telegram_id,
+      bonus_daily: 0,
+      extra_credits: 0,
+      is_premium: false,
+      referred_by: null,
+      referrals_count: 0,
+    }
+  );
+}
+
+async function ensureEntitlements(telegram_id: number) {
+  await admin().from("user_entitlements").upsert({ telegram_id }, { onConflict: "telegram_id" });
+}
+
+export async function addBonusDaily(telegram_id: number, amount: number) {
+  await ensureEntitlements(telegram_id);
+  const e = await getEntitlements(telegram_id);
+  await admin()
+    .from("user_entitlements")
+    .update({ bonus_daily: Math.max(0, e.bonus_daily + amount), updated_at: new Date().toISOString() })
+    .eq("telegram_id", telegram_id);
+}
+
+export async function addExtraCredits(telegram_id: number, amount: number) {
+  await ensureEntitlements(telegram_id);
+  const e = await getEntitlements(telegram_id);
+  await admin()
+    .from("user_entitlements")
+    .update({ extra_credits: Math.max(0, e.extra_credits + amount), updated_at: new Date().toISOString() })
+    .eq("telegram_id", telegram_id);
+}
+
+export async function setPremium(telegram_id: number, on: boolean) {
+  await ensureEntitlements(telegram_id);
+  await admin()
+    .from("user_entitlements")
+    .update({
+      is_premium: on,
+      premium_since: on ? new Date().toISOString() : null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("telegram_id", telegram_id);
+}
+
+/** Register a referral once; grants the referrer +1 permanent daily search. */
+export async function registerReferral(newUserId: number, referrerId: number): Promise<boolean> {
+  if (!referrerId || referrerId === newUserId) return false;
+  await ensureEntitlements(newUserId);
+  const e = await getEntitlements(newUserId);
+  if (e.referred_by) return false;
+  await admin()
+    .from("user_entitlements")
+    .update({ referred_by: referrerId, updated_at: new Date().toISOString() })
+    .eq("telegram_id", newUserId);
+  await ensureEntitlements(referrerId);
+  const r = await getEntitlements(referrerId);
+  await admin()
+    .from("user_entitlements")
+    .update({
+      bonus_daily: r.bonus_daily + 1,
+      referrals_count: r.referrals_count + 1,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("telegram_id", referrerId);
+  return true;
+}
+
+export async function searchesUsedToday(telegram_id: number): Promise<number> {
+  const day = new Date().toISOString().slice(0, 10);
+  const { data } = await admin()
+    .from("search_usage")
+    .select("used")
+    .eq("telegram_id", telegram_id)
+    .eq("day", day)
+    .maybeSingle();
+  return Number((data as any)?.used ?? 0);
+}
+
+/** Atomically consume one search against the daily limit / one-off credits. */
+export async function consumeSearch(telegram_id: number, limit: number): Promise<{ allowed: boolean; used: number }> {
+  const { data, error } = await admin().rpc("consume_search", { _telegram_id: telegram_id, _limit: limit });
+  if (error) return { allowed: true, used: 0 }; // never lock users out on a DB hiccup
+  const row: any = Array.isArray(data) ? data[0] : data;
+  return { allowed: !!row?.allowed, used: Number(row?.used ?? 0) };
+}
+
 export async function stats() {
   const a = admin();
   const [{ count: movies }, { count: users }, { count: groups }, { data: payments }] = await Promise.all([

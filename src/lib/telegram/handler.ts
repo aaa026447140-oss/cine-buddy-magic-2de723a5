@@ -381,6 +381,8 @@ async function handleMessage(msg: any) {
         await sendMessage(chat.id, perm.text, perm.extra || {}).catch(() => {});
         return;
       }
+      const settings = await getSettings();
+      if (!(await allowSearch(Number(chat.id), Number(from.id), settings, true, msg.message_id))) return;
       await safeRunSearchAndRespond(chat.id, from.id, text, 0, null, true);
     }
     return;

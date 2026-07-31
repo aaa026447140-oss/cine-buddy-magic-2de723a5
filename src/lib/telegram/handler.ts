@@ -744,13 +744,17 @@ async function handleCallback(cq: any) {
       }),
     );
     const totalGroupMembers = groupCounts.reduce((a, b) => a + b, 0);
+    const r = await uniqueReach(totalGroupMembers, users).catch(() => null);
     const totalPrivate = users.length;
-    const combined = totalGroupMembers + totalPrivate;
+    const overlap = r?.overlap ?? 0;
+    const combined = Math.max(totalGroupMembers, totalGroupMembers + totalPrivate - overlap);
     const text =
       `📢 <b>פרסום ממומן</b>\n\n` +
       `👨‍👩‍👧 סה״כ משתמשים בקבוצות: <b>${totalGroupMembers.toLocaleString()}</b>\n` +
       `👤 סה״כ משתמשים בפרטי: <b>${totalPrivate.toLocaleString()}</b>\n` +
-      `🌐 סה״כ חשיפה משוערת: <b>${combined.toLocaleString()}</b>\n\n` +
+      `🌐 סה״כ חשיפה ייחודית (ללא כפילויות): <b>${combined.toLocaleString()}</b>\n` +
+      (overlap ? `🔁 נוכו ${overlap.toLocaleString()} משתמשים שנמצאים גם בקבוצה וגם בפרטי\n` : "") +
+      `\n` +
       `רוצה לפרסם? לחץ על הכפתור למטה.`;
     await editMessageText(chatId, msg.message_id, text, {
       reply_markup: {
@@ -781,6 +785,55 @@ async function handleCallback(cq: any) {
   }
 
   if (data === "support_menu") {
+    await answerCallbackQuery(cq.id);
+    await editMessageText(
+      chatId,
+      msg.message_id,
+      `❤️ <b>תמיכה בבוט</b>\n\nתודה רבה על השיקול לתמוך! בחר את סכום הכוכבים:`,
+      { reply_markup: supportMenuKeyboard() },
+    ).catch(() => {});
+    return;
+  }
+
+  if (data === "quota_menu") {
+    await answerCallbackQuery(cq.id);
+    await sendQuotaMenu(chatId, Number(from.id), msg.message_id);
+    return;
+  }
+
+  if (data === "quota_link") {
+    await answerCallbackQuery(cq.id);
+    const me2 = await getMe();
+    await sendMessage(chatId, `🔗 קישור ההזמנה שלך:\n<code>https://t.me/${me2.username}?start=r_${from.id}</code>`).catch(() => {});
+    return;
+  }
+
+  if (data === "buy_single" || data === "buy_daily" || data === "buy_premium") {
+    await answerCallbackQuery(cq.id);
+    const s = await getSettings();
+    const kind = data.slice(4);
+    const map: Record<string, { amount: number; title: string; desc: string }> = {
+      single: { amount: s.price_single_search, title: "חיפוש נוסף חד־פעמי", desc: "חיפוש אחד נוסף מעבר למכסה היומית." },
+      daily: { amount: s.price_daily_extra, title: "+1 חיפוש בכל יום", desc: "תוספת קבועה של חיפוש אחד בכל יום, לתמיד." },
+      premium: { amount: s.price_premium, title: "פרימיום — ללא הגבלה", desc: "חיפושים ללא הגבלה, ללא מכסה יומית." },
+    };
+    const item = map[kind];
+    if (!item || !(item.amount > 0)) return;
+    await sendInvoice({
+      chat_id: chatId,
+      title: item.title,
+      description: item.desc,
+      payload: `buy:${kind}:${from.id}:${Date.now()}`,
+      currency: "XTR",
+      prices: [{ label: `${item.amount} Stars`, amount: item.amount }],
+    }).catch((e: any) => {
+      console.error("sendInvoice failed:", e?.message);
+      sendMessage(chatId, "❌ לא הצלחתי לפתוח חלון תשלום. נסה שוב מאוחר יותר.");
+    });
+    return;
+  }
+
+  if (data === "__never_support_menu") {
     await answerCallbackQuery(cq.id);
     await editMessageText(
       chatId,

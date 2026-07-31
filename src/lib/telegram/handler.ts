@@ -1831,7 +1831,6 @@ async function renderUserViewImpl(chatId: number, messageId: number, telegramId:
     `📅 הצטרף: ${new Date(u.first_seen).toLocaleString("he-IL")}\n` +
     `🕓 נראה לאחרונה: ${new Date(u.last_seen).toLocaleString("he-IL")}\n` +
     `⭐ תרומות בכוכבים: <b>${stars.toLocaleString()}</b>\n` +
-    `⭐ תרומות בכוכבים: <b>${stars.toLocaleString()}</b>\n`.slice(0, 0) +
     `🔍 חיפוש אחרון: ${recent[0] ? `<code>${escapeHtml(recent[0].query)}</code> · ${formatWhen(recent[0].created_at)}` : "—"}\n` +
     `סטטוס: ${u.is_blocked ? "🚫 חסום" : "✅ פעיל"}` +
     (u.is_blocked

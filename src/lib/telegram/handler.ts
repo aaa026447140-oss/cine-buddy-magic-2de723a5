@@ -12,6 +12,7 @@ import {
   tg,
 } from "./api";
 import { ADMIN_ID, PAGE_SIZE, STAR_AMOUNTS } from "./constants";
+import { formatDuration, formatWhen, isInappropriateQuery } from "./moderation";
 import {
   addAdmin,
   addSourceChannel,
@@ -29,6 +30,10 @@ import {
   getCachedSearchAll,
   getAdminState,
   getBotUser,
+  applyAutoBlock,
+  releaseIfExpired,
+  logSearch,
+  lastSearches,
   getMovieById,
   getSettings,
   indexMovie,
@@ -398,10 +403,11 @@ async function handleMessage(msg: any) {
       if (text.length < 2) return;
       // Blocked user in a group: silently ignore search attempts, but notify them.
       const bu = await getBotUser(Number(from.id)).catch(() => null);
-      if (bu?.is_blocked) {
-        await sendMessage(chat.id, "🚫 אתה חסום פנה למנהל", { reply_to_message_id: msg.message_id } as any).catch(() => {});
+      if (bu?.is_blocked && !(await releaseIfExpired(bu).catch(() => false))) {
+        await sendMessage(chat.id, blockedNotice(bu), { reply_to_message_id: msg.message_id } as any).catch(() => {});
         return;
       }
+      if (await moderationGate(chat.id, Number(from.id), text, msg.message_id)) return;
       // Require bot admin+can_invite_users permission in the group before serving results.
       const perm = await checkGroupPermissions(chat.id).catch(() => ({ ok: true } as any));
       if (!perm.ok) {
@@ -410,6 +416,7 @@ async function handleMessage(msg: any) {
       }
       const settings = await getSettings();
       if (!(await allowSearch(Number(chat.id), Number(from.id), settings, true, msg.message_id))) return;
+      logSearch(Number(from.id), text).catch(() => {});
       await safeRunSearchAndRespond(chat.id, from.id, text, 0, null, true);
     }
     return;
@@ -481,8 +488,10 @@ async function handleMessage(msg: any) {
   {
     const bu = await getBotUser(Number(from.id)).catch(() => null);
     if (bu?.is_blocked && text && !text.startsWith("/start") && text !== "/stats" && text !== "/admin") {
-      await sendMessage(chat.id, "🚫 אתה חסום פנה למנהל").catch(() => {});
-      return;
+      if (!(await releaseIfExpired(bu).catch(() => false))) {
+        await sendMessage(chat.id, blockedNotice(bu)).catch(() => {});
+        return;
+      }
     }
   }
 
@@ -523,10 +532,40 @@ async function handleMessage(msg: any) {
 
   // Free-text search in private
   if (text && !text.startsWith("/")) {
+    if (await moderationGate(chat.id, Number(from.id), text)) return;
     const settings = await getSettings();
     if (!(await allowSearch(chat.id, Number(from.id), settings, false))) return;
+    logSearch(Number(from.id), text).catch(() => {});
     return await safeRunSearchAndRespond(chat.id, Number(from.id), text, 0, null, false);
   }
+}
+
+/** Message shown to an already-blocked user, including release time. */
+function blockedNotice(u: { blocked_until?: string | null; block_reason?: string | null }) {
+  if (!u.blocked_until) return "🚫 אתה חסום לצמיתות. פנה למנהל.";
+  return (
+    "🚫 אתה חסום כרגע.\n" +
+    (u.block_reason ? `סיבה: ${u.block_reason}\n` : "") +
+    `תשוחרר: ${formatWhen(u.blocked_until)}`
+  );
+}
+
+/**
+ * Blocks a user who searched inappropriate content, escalating the duration on
+ * each offence (5m → 15m → 30m → 1d → 2d → week → permanent).
+ * Returns true when the search must not proceed.
+ */
+async function moderationGate(chatId: number, userId: number, query: string, replyTo?: number) {
+  if (!isInappropriateQuery(query)) return false;
+  const r = await applyAutoBlock(userId, "חיפוש לא הולם").catch(() => null);
+  const text = r
+    ? "🚫 נחסמת עקב חיפוש לא הולם.\n" +
+      (r.minutes
+        ? `משך החסימה: ${formatDuration(r.minutes)}\nתשוחרר: ${formatWhen(r.until!)}`
+        : "החסימה היא לצמיתות.")
+    : "🚫 נחסמת עקב חיפוש לא הולם.";
+  await sendMessage(chatId, text, replyTo ? ({ reply_to_message_id: replyTo } as any) : undefined).catch(() => {});
+  return true;
 }
 
 async function buildStatsView() {

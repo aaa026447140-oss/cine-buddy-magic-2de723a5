@@ -56,6 +56,15 @@ import {
   upsertGroup,
   upsertUser,
   userStars,
+  touchGroupMember,
+  uniqueReach,
+  getEntitlements,
+  addBonusDaily,
+  addExtraCredits,
+  setPremium,
+  registerReferral,
+  searchesUsedToday,
+  consumeSearch,
   type BotSettings,
   type BotUserRow,
 } from "./db";
@@ -70,6 +79,8 @@ import {
   startMenuKeyboard,
   subscribeRequiredKeyboard,
   supportMenuKeyboard,
+  quotaMenuKeyboard,
+  quotaAdminKeyboard,
 } from "./keyboards";
 
 let _me: { id: number; username: string } | null = null;
@@ -177,6 +188,122 @@ async function isSubscribed(userId: number, settings: BotSettings): Promise<bool
   return (await missingRequiredChannels(userId, settings)).length === 0;
 }
 
+// ───── Search quota ─────
+type QuotaInfo = {
+  enabled: boolean;
+  premium: boolean;
+  limit: number;
+  used: number;
+  bonus: number;
+  credits: number;
+  referrals: number;
+};
+
+async function quotaInfo(userId: number, settings: BotSettings): Promise<QuotaInfo> {
+  const [ent, used] = await Promise.all([
+    getEntitlements(userId).catch(() => null),
+    searchesUsedToday(userId).catch(() => 0),
+  ]);
+  const bonus = ent?.bonus_daily ?? 0;
+  return {
+    enabled: !!settings.quota_enabled,
+    premium: !!ent?.is_premium,
+    limit: Math.max(0, Number(settings.free_searches_per_day || 0)) + bonus,
+    used,
+    bonus,
+    credits: ent?.extra_credits ?? 0,
+    referrals: ent?.referrals_count ?? 0,
+  };
+}
+
+/**
+ * Consume one search from the user's daily allowance.
+ * Returns true when the search may proceed; otherwise sends the upsell prompt.
+ */
+async function allowSearch(
+  chatId: number,
+  userId: number,
+  settings: BotSettings,
+  inGroup: boolean,
+  replyToMessageId?: number,
+): Promise<boolean> {
+  if (!settings.quota_enabled) return true;
+  if (await isAdmin(userId)) return true;
+  const ent = await getEntitlements(userId).catch(() => null);
+  if (ent?.is_premium) return true;
+  const limit = Math.max(0, Number(settings.free_searches_per_day || 0)) + (ent?.bonus_daily ?? 0);
+  const res = await consumeSearch(userId, limit);
+  if (res.allowed) return true;
+  const me = await getMe();
+  if (inGroup) {
+    await sendMessage(
+      chatId,
+      `⏳ נגמרו לך החיפושים החינמיים להיום (${limit}).\nפתח את הבוט בפרטי כדי לקבל עוד חיפושים.`,
+      {
+        reply_to_message_id: replyToMessageId,
+        reply_markup: { inline_keyboard: [[{ text: "🎟️ קבל עוד חיפושים", url: `https://t.me/${me.username}?start=quota` }]] },
+      } as any,
+    ).catch(() => {});
+    return false;
+  }
+  await sendMessage(chatId, quotaText(await quotaInfo(userId, settings), settings, me.username, userId), {
+    reply_markup: quotaMenuKeyboard(settings, me.username, userId, false),
+  }).catch(() => {});
+  return false;
+}
+
+function quotaText(q: QuotaInfo, s: BotSettings, botUsername: string, userId: number): string {
+  if (q.premium) {
+    return (
+      `💎 <b>פרימיום פעיל</b>\n\n` +
+      `יש לך חיפושים <b>ללא הגבלה</b>. תודה על התמיכה ❤️\n\n` +
+      `🔗 קישור ההזמנה שלך:\n<code>https://t.me/${botUsername}?start=r_${userId}</code>`
+    );
+  }
+  const left = Math.max(0, q.limit - q.used);
+  return (
+    `🎟️ <b>החיפושים שלי</b>\n\n` +
+    `🔍 חיפושים חינם היום: <b>${left}</b> מתוך <b>${q.limit}</b>\n` +
+    (q.bonus ? `🎁 בונוס קבוע מהזמנות: <b>+${q.bonus}</b> ליום (${q.referrals} הזמנות)\n` : "") +
+    (q.credits ? `⚡ חיפושים חד־פעמיים שנרכשו: <b>${q.credits}</b>\n` : "") +
+    `\n📣 <b>הזמן חברים</b> — כל משתמש חדש שיצטרף דרך הקישור שלך מוסיף לך <b>+1 חיפוש בכל יום</b>, לתמיד.\n` +
+    `🔗 <code>https://t.me/${botUsername}?start=r_${userId}</code>\n\n` +
+    `💫 אפשר גם לרכוש:\n` +
+    `• ⚡ חיפוש נוסף חד־פעמי — ${s.price_single_search} ⭐\n` +
+    `• 📅 +1 חיפוש בכל יום (לתמיד) — ${s.price_daily_extra} ⭐\n` +
+    `• 💎 פרימיום ללא הגבלה — ${s.price_premium} ⭐`
+  );
+}
+
+async function sendQuotaMenu(chatId: number, userId: number, editMessageId?: number) {
+  const settings = await getSettings();
+  const me = await getMe();
+  const q = await quotaInfo(userId, settings);
+  const text = quotaText(q, settings, me.username, userId);
+  const kb = quotaMenuKeyboard(settings, me.username, userId, q.premium);
+  if (editMessageId) {
+    const ok = await editMessageText(chatId, editMessageId, text, { reply_markup: kb }).then(() => true).catch(() => false);
+    if (ok) return;
+  }
+  await sendMessage(chatId, text, { reply_markup: kb }).catch(() => {});
+}
+
+function quotaAdminText(s: BotSettings): string {
+  return (
+    `🎟️ <b>ניהול חיפושים ומחירים</b>\n\n` +
+    `מצב: <b>${s.quota_enabled ? "מוגבל (מכסה יומית)" : "חופשי — ללא הגבלה"}</b>\n` +
+    `🔢 חיפושים חינם ליום: <b>${s.free_searches_per_day}</b>\n` +
+    `⚡ חיפוש חד־פעמי: <b>${s.price_single_search}</b> ⭐\n` +
+    `📅 +1 חיפוש בכל יום: <b>${s.price_daily_extra}</b> ⭐\n` +
+    `💎 פרימיום ללא הגבלה: <b>${s.price_premium}</b> ⭐\n\n` +
+    `🎁 כל משתמש חדש שמצטרף דרך קישור ההזמנה מוסיף למזמין +1 חיפוש בכל יום.`
+  );
+}
+
+async function renderQuotaAdmin(chatId: number, messageId: number, s: BotSettings) {
+  await editMessageText(chatId, messageId, quotaAdminText(s), { reply_markup: quotaAdminKeyboard(s) }).catch(() => {});
+}
+
 async function requireSubscriptionOrPrompt(
   chatId: number,
   userId: number,
@@ -252,6 +379,7 @@ async function handleMessage(msg: any) {
   // Group: track membership and handle search by text
   if (chat.type === "group" || chat.type === "supergroup") {
     await upsertGroup({ id: Number(chat.id), title: chat.title, type: chat.type });
+    touchGroupMember(Number(chat.id), Number(from.id)).catch(() => {});
     if (msg.text) {
       // Treat any text starting with "?" or any text that isn't a command as a search.
       const text = msg.text.trim();
@@ -269,6 +397,8 @@ async function handleMessage(msg: any) {
         await sendMessage(chat.id, perm.text, perm.extra || {}).catch(() => {});
         return;
       }
+      const settings = await getSettings();
+      if (!(await allowSearch(Number(chat.id), Number(from.id), settings, true, msg.message_id))) return;
       await safeRunSearchAndRespond(chat.id, from.id, text, 0, null, true);
     }
     return;
@@ -287,13 +417,28 @@ async function handleMessage(msg: any) {
   // Successful payment notification
   if (msg.successful_payment) {
     const sp = msg.successful_payment;
+    const payload: string = sp.invoice_payload || "";
     await recordPayment({
       telegram_user_id: Number(from.id),
       stars_amount: Number(sp.total_amount),
       telegram_payment_charge_id: sp.telegram_payment_charge_id,
       telegram_provider_charge_id: sp.provider_payment_charge_id || "",
-      payload: sp.invoice_payload,
+      payload,
     });
+    if (payload.startsWith("buy:")) {
+      const kind = payload.split(":")[1];
+      if (kind === "single") {
+        await addExtraCredits(Number(from.id), 1).catch(() => {});
+        await sendMessage(chat.id, "⚡ נוסף לך חיפוש נוסף חד־פעמי. תודה! ❤️");
+      } else if (kind === "daily") {
+        await addBonusDaily(Number(from.id), 1).catch(() => {});
+        await sendMessage(chat.id, "📅 מעכשיו יש לך +1 חיפוש בכל יום, לתמיד. תודה! ❤️");
+      } else if (kind === "premium") {
+        await setPremium(Number(from.id), true).catch(() => {});
+        await sendMessage(chat.id, "💎 הפרימיום הופעל! חיפושים ללא הגבלה. תודה! ❤️");
+      }
+      return;
+    }
     await sendMessage(chat.id, `🙏 תודה רבה על התמיכה! קיבלנו ${sp.total_amount} ⭐`);
     return;
   }
@@ -338,6 +483,22 @@ async function handleMessage(msg: any) {
       const movieId = Number(payload.slice(2));
       return await serveMovie(chat.id, Number(from.id), movieId);
     }
+    if (payload.startsWith("r_")) {
+      const referrer = Number(payload.slice(2));
+      if (Number.isFinite(referrer) && referrer !== Number(from.id)) {
+        const ok = await registerReferral(Number(from.id), referrer).catch(() => false);
+        if (ok) {
+          const settings = await getSettings();
+          if (settings.quota_enabled) {
+            await sendMessage(referrer, "🎉 מישהו הצטרף דרך הקישור שלך — קיבלת +1 חיפוש בכל יום!").catch(() => {});
+          }
+        }
+      }
+      return await sendStartMenu(chat.id, Number(from.id));
+    }
+    if (payload === "quota") {
+      return await sendQuotaMenu(chat.id, Number(from.id));
+    }
     return await sendStartMenu(chat.id, Number(from.id));
   }
 
@@ -351,6 +512,8 @@ async function handleMessage(msg: any) {
 
   // Free-text search in private
   if (text && !text.startsWith("/")) {
+    const settings = await getSettings();
+    if (!(await allowSearch(chat.id, Number(from.id), settings, false))) return;
     return await safeRunSearchAndRespond(chat.id, Number(from.id), text, 0, null, false);
   }
 }
@@ -387,7 +550,7 @@ async function sendStats(chatId: number, _userId?: number) {
 async function buildStartView(userId: number) {
   const settings = await getSettings();
   const me = await getMe();
-  const text =
+  let text =
     `🎬 <b>בוט חיפוש סרטים</b>\n\n` +
     `🔍 כדי לחפש סרט — פשוט <b>שלח לי את שם הסרט</b> בהודעה כאן בצ׳אט.\n` +
     `לדוגמה: <code>הארי פוטר</code> או <code>Inception</code>\n\n` +
@@ -395,6 +558,13 @@ async function buildStartView(userId: number) {
     `📚 אם יש הרבה תוצאות — אפשר לדפדף בעמודים בעזרת הכפתורים למטה.\n\n` +
     `💡 ניתן גם להוסיף אותי לקבוצות ולחפש שם.`;
   const kb = startMenuKeyboard(settings, me.username);
+  if (settings.quota_enabled) {
+    const q = await quotaInfo(userId, settings);
+    text += q.premium
+      ? `\n\n💎 <b>פרימיום פעיל</b> — חיפושים ללא הגבלה.`
+      : `\n\n🎟️ נשארו לך היום <b>${Math.max(0, q.limit - q.used)}</b> מתוך <b>${q.limit}</b> חיפושים חינם.`;
+    kb.inline_keyboard.unshift([{ text: "🎟️ החיפושים שלי", callback_data: "quota_menu" }]);
+  }
   if (await isAdmin(userId)) {
     kb.inline_keyboard.unshift([{ text: "⚙️ לוח אדמין", callback_data: "admin_open" }]);
   }
@@ -590,13 +760,17 @@ async function handleCallback(cq: any) {
       }),
     );
     const totalGroupMembers = groupCounts.reduce((a, b) => a + b, 0);
+    const r = await uniqueReach(totalGroupMembers, users).catch(() => null);
     const totalPrivate = users.length;
-    const combined = totalGroupMembers + totalPrivate;
+    const overlap = r?.overlap ?? 0;
+    const combined = Math.max(totalGroupMembers, totalGroupMembers + totalPrivate - overlap);
     const text =
       `📢 <b>פרסום ממומן</b>\n\n` +
       `👨‍👩‍👧 סה״כ משתמשים בקבוצות: <b>${totalGroupMembers.toLocaleString()}</b>\n` +
       `👤 סה״כ משתמשים בפרטי: <b>${totalPrivate.toLocaleString()}</b>\n` +
-      `🌐 סה״כ חשיפה משוערת: <b>${combined.toLocaleString()}</b>\n\n` +
+      `🌐 סה״כ חשיפה ייחודית (ללא כפילויות): <b>${combined.toLocaleString()}</b>\n` +
+      (overlap ? `🔁 נוכו ${overlap.toLocaleString()} משתמשים שנמצאים גם בקבוצה וגם בפרטי\n` : "") +
+      `\n` +
       `רוצה לפרסם? לחץ על הכפתור למטה.`;
     await editMessageText(chatId, msg.message_id, text, {
       reply_markup: {
@@ -634,6 +808,44 @@ async function handleCallback(cq: any) {
       `❤️ <b>תמיכה בבוט</b>\n\nתודה רבה על השיקול לתמוך! בחר את סכום הכוכבים:`,
       { reply_markup: supportMenuKeyboard() },
     ).catch(() => {});
+    return;
+  }
+
+  if (data === "quota_menu") {
+    await answerCallbackQuery(cq.id);
+    await sendQuotaMenu(chatId, Number(from.id), msg.message_id);
+    return;
+  }
+
+  if (data === "quota_link") {
+    await answerCallbackQuery(cq.id);
+    const me2 = await getMe();
+    await sendMessage(chatId, `🔗 קישור ההזמנה שלך:\n<code>https://t.me/${me2.username}?start=r_${from.id}</code>`).catch(() => {});
+    return;
+  }
+
+  if (data === "buy_single" || data === "buy_daily" || data === "buy_premium") {
+    await answerCallbackQuery(cq.id);
+    const s = await getSettings();
+    const kind = data.slice(4);
+    const map: Record<string, { amount: number; title: string; desc: string }> = {
+      single: { amount: s.price_single_search, title: "חיפוש נוסף חד־פעמי", desc: "חיפוש אחד נוסף מעבר למכסה היומית." },
+      daily: { amount: s.price_daily_extra, title: "+1 חיפוש בכל יום", desc: "תוספת קבועה של חיפוש אחד בכל יום, לתמיד." },
+      premium: { amount: s.price_premium, title: "פרימיום — ללא הגבלה", desc: "חיפושים ללא הגבלה, ללא מכסה יומית." },
+    };
+    const item = map[kind];
+    if (!item || !(item.amount > 0)) return;
+    await sendInvoice({
+      chat_id: chatId,
+      title: item.title,
+      description: item.desc,
+      payload: `buy:${kind}:${from.id}:${Date.now()}`,
+      currency: "XTR",
+      prices: [{ label: `${item.amount} Stars`, amount: item.amount }],
+    }).catch((e: any) => {
+      console.error("sendInvoice failed:", e?.message);
+      sendMessage(chatId, "❌ לא הצלחתי לפתוח חלון תשלום. נסה שוב מאוחר יותר.");
+    });
     return;
   }
 
@@ -752,8 +964,35 @@ async function handleAdminCallback(cq: any, data: string) {
       data.startsWith("admin_req_") ||
       data === "admin_manage" ||
       data === "admin_add" ||
+      data === "admin_quota" ||
+      data.startsWith("admin_q_") ||
       data.startsWith("admin_rm_"))
   ) {
+    return;
+  }
+
+  // Search quota / pricing management (main admin only)
+  if (data === "admin_quota" || data.startsWith("admin_q_")) {
+    const s = await getSettings();
+    if (data === "admin_quota") {
+      return await renderQuotaAdmin(chatId, messageId, s);
+    }
+    if (data === "admin_q_toggle") {
+      await updateSettings({ quota_enabled: !s.quota_enabled } as any);
+      return await renderQuotaAdmin(chatId, messageId, await getSettings());
+    }
+    const prompts: Record<string, string> = {
+      admin_q_free: "🔢 שלח את מספר החיפושים החינמיים ליום (0 = ללא חינם):",
+      admin_q_p_single: "⚡ שלח את המחיר בכוכבים לחיפוש נוסף חד־פעמי:",
+      admin_q_p_daily: "📅 שלח את המחיר בכוכבים לתוספת קבועה של חיפוש בכל יום:",
+      admin_q_p_premium: "💎 שלח את המחיר בכוכבים לפרימיום (ללא הגבלה):",
+      admin_q_grant: "💎 שלח את מזהה המשתמש (ID) שיקבל פרימיום:",
+      admin_q_revoke: "🚫 שלח את מזהה המשתמש (ID) שממנו יוסר הפרימיום:",
+    };
+    if (prompts[data]) {
+      await setAdminState(Number(userId), data);
+      return await sendMessage(chatId, `${prompts[data]}\n\nלביטול שלח /cancel`).then(() => {}).catch(() => {});
+    }
     return;
   }
 
@@ -1041,6 +1280,36 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
   if (text === "/cancel") {
     await setAdminState(userId, null);
     await sendMessage(chatId, "❎ בוטל.");
+    return;
+  }
+
+  // Search quota / pricing inputs
+  if (st.state.startsWith("admin_q_")) {
+    const n = parseInt(text.replace(/[^\d-]/g, ""), 10);
+    if (!Number.isFinite(n)) {
+      await sendMessage(chatId, "❌ שלח מספר בלבד. לביטול /cancel");
+      return;
+    }
+    await setAdminState(userId, null);
+    if (st.state === "admin_q_grant" || st.state === "admin_q_revoke") {
+      const on = st.state === "admin_q_grant";
+      await setPremium(n, on).catch(() => {});
+      await sendMessage(chatId, on ? `✅ ניתן פרימיום למשתמש <code>${n}</code>` : `✅ הוסר פרימיום מהמשתמש <code>${n}</code>`);
+      await sendMessage(n, on ? "💎 קיבלת פרימיום — חיפושים ללא הגבלה!" : "ℹ️ הפרימיום שלך הוסר.").catch(() => {});
+    } else {
+      const field =
+        st.state === "admin_q_free"
+          ? "free_searches_per_day"
+          : st.state === "admin_q_p_single"
+            ? "price_single_search"
+            : st.state === "admin_q_p_daily"
+              ? "price_daily_extra"
+              : "price_premium";
+      await updateSettings({ [field]: Math.max(0, n) } as any);
+      await sendMessage(chatId, "✅ עודכן.");
+    }
+    const s = await getSettings();
+    await sendMessage(chatId, quotaAdminText(s), { reply_markup: quotaAdminKeyboard(s) }).catch(() => {});
     return;
   }
 

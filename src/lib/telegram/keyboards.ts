@@ -30,6 +30,44 @@ export function startMenuKeyboard(s: BotSettings, botUsername: string) {
   return { inline_keyboard: rows };
 }
 
+export function quotaMenuKeyboard(
+  s: BotSettings,
+  botUsername: string,
+  userId: number,
+  isPremium: boolean,
+) {
+  const rows: any[][] = [];
+  rows.push([
+    {
+      text: "🔗 הזמן חברים וקבל חיפושים",
+      url: `https://t.me/share/url?url=${encodeURIComponent(`https://t.me/${botUsername}?start=r_${userId}`)}&text=${encodeURIComponent("בוט חיפוש סרטים 🎬")}`,
+    },
+  ]);
+  rows.push([{ text: "📋 העתק את קישור ההזמנה שלי", callback_data: "quota_link" }]);
+  if (!isPremium) {
+    rows.push([{ text: `⚡ חיפוש נוסף חד־פעמי · ${s.price_single_search} ⭐`, callback_data: "buy_single" }]);
+    rows.push([{ text: `📅 +1 חיפוש כל יום · ${s.price_daily_extra} ⭐`, callback_data: "buy_daily" }]);
+    rows.push([{ text: `💎 פרימיום — ללא הגבלה · ${s.price_premium} ⭐`, callback_data: "buy_premium" }]);
+  }
+  rows.push([{ text: "« חזרה", callback_data: "back_to_start" }]);
+  return { inline_keyboard: rows };
+}
+
+export function quotaAdminKeyboard(s: BotSettings) {
+  return {
+    inline_keyboard: [
+      [{ text: s.quota_enabled ? "🟢 מערכת חיפושים: פעילה (כבה)" : "🔴 מערכת חיפושים: כבויה (הפעל)", callback_data: "admin_q_toggle" }],
+      [{ text: `🔢 חיפושים חינם ליום: ${s.free_searches_per_day}`, callback_data: "admin_q_free" }],
+      [{ text: `⚡ מחיר חיפוש חד־פעמי: ${s.price_single_search} ⭐`, callback_data: "admin_q_p_single" }],
+      [{ text: `📅 מחיר חיפוש יומי קבוע: ${s.price_daily_extra} ⭐`, callback_data: "admin_q_p_daily" }],
+      [{ text: `💎 מחיר פרימיום: ${s.price_premium} ⭐`, callback_data: "admin_q_p_premium" }],
+      [{ text: "💎 העניק פרימיום למשתמש", callback_data: "admin_q_grant" }],
+      [{ text: "🚫 בטל פרימיום למשתמש", callback_data: "admin_q_revoke" }],
+      [{ text: "« חזרה", callback_data: "admin_open" }],
+    ],
+  };
+}
+
 export function supportMenuKeyboard() {
   const rows = STAR_AMOUNTS.map((n) => [{ text: `⭐ ${n} כוכבים`, callback_data: `donate_${n}` }]);
   rows.push([{ text: "« חזרה", callback_data: "back_to_start" }]);
@@ -121,6 +159,9 @@ export function adminPanelKeyboard(isMain: boolean) {
     rows.push([{ text: "🔒 ניהול ערוצי חובה", callback_data: "admin_required" }]);
   }
   rows.push([{ text: "🔎 הגדרת קבוצת חיפוש", callback_data: "admin_set_search_group" }]);
+  if (isMain) {
+    rows.push([{ text: "🎟️ ניהול חיפושים ומחירים", callback_data: "admin_quota" }]);
+  }
   rows.push([{ text: "📊 סטטיסטיקות", callback_data: "admin_stats" }]);
   rows.push([
     { text: "👤 משתמשים", callback_data: "admin_users" },

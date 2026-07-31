@@ -188,6 +188,106 @@ async function isSubscribed(userId: number, settings: BotSettings): Promise<bool
   return (await missingRequiredChannels(userId, settings)).length === 0;
 }
 
+// ───── Search quota ─────
+type QuotaInfo = {
+  enabled: boolean;
+  premium: boolean;
+  limit: number;
+  used: number;
+  bonus: number;
+  credits: number;
+  referrals: number;
+};
+
+async function quotaInfo(userId: number, settings: BotSettings): Promise<QuotaInfo> {
+  const [ent, used] = await Promise.all([
+    getEntitlements(userId).catch(() => null),
+    searchesUsedToday(userId).catch(() => 0),
+  ]);
+  const bonus = ent?.bonus_daily ?? 0;
+  return {
+    enabled: !!settings.quota_enabled,
+    premium: !!ent?.is_premium,
+    limit: Math.max(0, Number(settings.free_searches_per_day || 0)) + bonus,
+    used,
+    bonus,
+    credits: ent?.extra_credits ?? 0,
+    referrals: ent?.referrals_count ?? 0,
+  };
+}
+
+/**
+ * Consume one search from the user's daily allowance.
+ * Returns true when the search may proceed; otherwise sends the upsell prompt.
+ */
+async function allowSearch(
+  chatId: number,
+  userId: number,
+  settings: BotSettings,
+  inGroup: boolean,
+  replyToMessageId?: number,
+): Promise<boolean> {
+  if (!settings.quota_enabled) return true;
+  if (await isAdmin(userId)) return true;
+  const ent = await getEntitlements(userId).catch(() => null);
+  if (ent?.is_premium) return true;
+  const limit = Math.max(0, Number(settings.free_searches_per_day || 0)) + (ent?.bonus_daily ?? 0);
+  const res = await consumeSearch(userId, limit);
+  if (res.allowed) return true;
+  const me = await getMe();
+  if (inGroup) {
+    await sendMessage(
+      chatId,
+      `⏳ נגמרו לך החיפושים החינמיים להיום (${limit}).\nפתח את הבוט בפרטי כדי לקבל עוד חיפושים.`,
+      {
+        reply_to_message_id: replyToMessageId,
+        reply_markup: { inline_keyboard: [[{ text: "🎟️ קבל עוד חיפושים", url: `https://t.me/${me.username}?start=quota` }]] },
+      } as any,
+    ).catch(() => {});
+    return false;
+  }
+  await sendMessage(chatId, quotaText(await quotaInfo(userId, settings), settings, me.username, userId), {
+    reply_markup: quotaMenuKeyboard(settings, me.username, userId, false),
+  }).catch(() => {});
+  return false;
+}
+
+function quotaText(q: QuotaInfo, s: BotSettings, botUsername: string, userId: number): string {
+  if (q.premium) {
+    return (
+      `💎 <b>פרימיום פעיל</b>\n\n` +
+      `יש לך חיפושים <b>ללא הגבלה</b>. תודה על התמיכה ❤️\n\n` +
+      `🔗 קישור ההזמנה שלך:\n<code>https://t.me/${botUsername}?start=r_${userId}</code>`
+    );
+  }
+  const left = Math.max(0, q.limit - q.used);
+  return (
+    `🎟️ <b>החיפושים שלי</b>\n\n` +
+    `🔍 חיפושים חינם היום: <b>${left}</b> מתוך <b>${q.limit}</b>\n` +
+    (q.bonus ? `🎁 בונוס קבוע מהזמנות: <b>+${q.bonus}</b> ליום (${q.referrals} הזמנות)\n` : "") +
+    (q.credits ? `⚡ חיפושים חד־פעמיים שנרכשו: <b>${q.credits}</b>\n` : "") +
+    `\n📣 <b>הזמן חברים</b> — כל משתמש חדש שיצטרף דרך הקישור שלך מוסיף לך <b>+1 חיפוש בכל יום</b>, לתמיד.\n` +
+    `🔗 <code>https://t.me/${botUsername}?start=r_${userId}</code>\n\n` +
+    `💫 אפשר גם לרכוש:\n` +
+    `• ⚡ חיפוש נוסף חד־פעמי — ${s.price_single_search} ⭐\n` +
+    `• 📅 +1 חיפוש בכל יום (לתמיד) — ${s.price_daily_extra} ⭐\n` +
+    `• 💎 פרימיום ללא הגבלה — ${s.price_premium} ⭐`
+  );
+}
+
+async function sendQuotaMenu(chatId: number, userId: number, editMessageId?: number) {
+  const settings = await getSettings();
+  const me = await getMe();
+  const q = await quotaInfo(userId, settings);
+  const text = quotaText(q, settings, me.username, userId);
+  const kb = quotaMenuKeyboard(settings, me.username, userId, q.premium);
+  if (editMessageId) {
+    const ok = await editMessageText(chatId, editMessageId, text, { reply_markup: kb }).then(() => true).catch(() => false);
+    if (ok) return;
+  }
+  await sendMessage(chatId, text, { reply_markup: kb }).catch(() => {});
+}
+
 async function requireSubscriptionOrPrompt(
   chatId: number,
   userId: number,

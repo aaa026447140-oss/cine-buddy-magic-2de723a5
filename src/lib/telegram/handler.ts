@@ -1278,6 +1278,36 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
     return;
   }
 
+  // Search quota / pricing inputs
+  if (st.state.startsWith("admin_q_")) {
+    const n = parseInt(text.replace(/[^\d-]/g, ""), 10);
+    if (!Number.isFinite(n)) {
+      await sendMessage(chatId, "❌ שלח מספר בלבד. לביטול /cancel");
+      return;
+    }
+    await setAdminState(userId, null);
+    if (st.state === "admin_q_grant" || st.state === "admin_q_revoke") {
+      const on = st.state === "admin_q_grant";
+      await setPremium(n, on).catch(() => {});
+      await sendMessage(chatId, on ? `✅ ניתן פרימיום למשתמש <code>${n}</code>` : `✅ הוסר פרימיום מהמשתמש <code>${n}</code>`);
+      await sendMessage(n, on ? "💎 קיבלת פרימיום — חיפושים ללא הגבלה!" : "ℹ️ הפרימיום שלך הוסר.").catch(() => {});
+    } else {
+      const field =
+        st.state === "admin_q_free"
+          ? "free_searches_per_day"
+          : st.state === "admin_q_p_single"
+            ? "price_single_search"
+            : st.state === "admin_q_p_daily"
+              ? "price_daily_extra"
+              : "price_premium";
+      await updateSettings({ [field]: Math.max(0, n) } as any);
+      await sendMessage(chatId, "✅ עודכן.");
+    }
+    const s = await getSettings();
+    await sendMessage(chatId, quotaAdminText(s), { reply_markup: quotaAdminKeyboard(s) }).catch(() => {});
+    return;
+  }
+
   if (
     st.state === "awaiting_source_channel" ||
     st.state === "awaiting_source_channel_add" ||

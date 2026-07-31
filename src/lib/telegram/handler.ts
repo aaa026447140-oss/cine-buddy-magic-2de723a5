@@ -1289,12 +1289,7 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
       return;
     }
     await setAdminState(userId, null);
-    if (st.state === "admin_q_grant" || st.state === "admin_q_revoke") {
-      const on = st.state === "admin_q_grant";
-      await setPremium(n, on).catch(() => {});
-      await sendMessage(chatId, on ? `✅ ניתן פרימיום למשתמש <code>${n}</code>` : `✅ הוסר פרימיום מהמשתמש <code>${n}</code>`);
-      await sendMessage(n, on ? "💎 קיבלת פרימיום — חיפושים ללא הגבלה!" : "ℹ️ הפרימיום שלך הוסר.").catch(() => {});
-    } else {
+    {
       const field =
         st.state === "admin_q_free"
           ? "free_searches_per_day"

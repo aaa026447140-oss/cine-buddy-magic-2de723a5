@@ -288,6 +288,22 @@ async function sendQuotaMenu(chatId: number, userId: number, editMessageId?: num
   await sendMessage(chatId, text, { reply_markup: kb }).catch(() => {});
 }
 
+function quotaAdminText(s: BotSettings): string {
+  return (
+    `🎟️ <b>ניהול חיפושים ומחירים</b>\n\n` +
+    `מצב: <b>${s.quota_enabled ? "מוגבל (מכסה יומית)" : "חופשי — ללא הגבלה"}</b>\n` +
+    `🔢 חיפושים חינם ליום: <b>${s.free_searches_per_day}</b>\n` +
+    `⚡ חיפוש חד־פעמי: <b>${s.price_single_search}</b> ⭐\n` +
+    `📅 +1 חיפוש בכל יום: <b>${s.price_daily_extra}</b> ⭐\n` +
+    `💎 פרימיום ללא הגבלה: <b>${s.price_premium}</b> ⭐\n\n` +
+    `🎁 כל משתמש חדש שמצטרף דרך קישור ההזמנה מוסיף למזמין +1 חיפוש בכל יום.`
+  );
+}
+
+async function renderQuotaAdmin(chatId: number, messageId: number, s: BotSettings) {
+  await editMessageText(chatId, messageId, quotaAdminText(s), { reply_markup: quotaAdminKeyboard(s) }).catch(() => {});
+}
+
 async function requireSubscriptionOrPrompt(
   chatId: number,
   userId: number,

@@ -383,21 +383,53 @@ async function serverLoadText(): Promise<string> {
   const bandwidth = (m.searches_today ?? 0) * 18 * 1024; // הערכה: ~18KB לפעולה
   const bwPct = Math.min(100, (bandwidth / PLAN_BANDWIDTH_BYTES) * 100);
   const now = new Date().toLocaleTimeString("he-IL", { timeZone: "Asia/Jerusalem" });
+  const uptime = (() => {
+    const s = m.uptime_sec ?? 0;
+    const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), mi = Math.floor((s % 3600) / 60);
+    return d > 0 ? `${d} ימים ${h} שע׳` : h > 0 ? `${h} שע׳ ${mi} דק׳` : `${mi} דק׳`;
+  })();
+  const shared = m.shared_buffers_bytes ?? 0;
+  const effCache = m.effective_cache_bytes ?? 0;
+  const ramEst = effCache > 0 ? effCache * 1.33 : 0; // הערכת RAM לפי הגדרות המסד
+  const memPerConn = m.work_mem_bytes ?? 0;
+  const memUsedEst = shared + memPerConn * conns;
+  const memPct = ramEst > 0 ? Math.min(100, (memUsedEst / ramEst) * 100) : 0;
+  const commits = m.commits ?? 0;
+  const rollbacks = m.rollbacks ?? 0;
+  const rbPct = commits + rollbacks > 0 ? (rollbacks / (commits + rollbacks)) * 100 : 0;
   return (
     `📈 <b>מד עומס שרת</b> · ${now}\n\n` +
     `⚙️ עומס כללי: <b>${load}%</b>\n<code>${bar(load)}</code>\n${loadLabel(load)}\n\n` +
+    `🧠 <b>זיכרון (RAM)</b>: ~${fmtBytes(memUsedEst)} מתוך ~${fmtBytes(ramEst)} (${Math.round(memPct)}%)\n` +
+    `<code>${bar(memPct)}</code>\n` +
+    `• מטמון פנימי (shared_buffers): ${fmtBytes(shared)}\n` +
+    `• זיכרון לשאילתה (work_mem): ${fmtBytes(memPerConn)}\n` +
+    `• זיכרון תחזוקה: ${fmtBytes(m.maintenance_work_mem_bytes ?? 0)}\n\n` +
     `🔌 חיבורים: <b>${conns}/${maxConns}</b> (${Math.round(connPct)}%)\n` +
+    `• פנויים: <b>${m.idle_conns ?? 0}</b> · תקועים בטרנזקציה: <b>${m.idle_in_tx ?? 0}</b>\n` +
     `⚡ שאילתות פעילות כרגע: <b>${m.active_queries ?? 0}</b>\n` +
+    `⏱️ השאילתה הארוכה ביותר: <b>${m.longest_query_sec ?? 0} שנ׳</b>\n` +
+    `🔒 שאילתות ממתינות לנעילה: <b>${m.waiting_queries ?? 0}</b>\n` +
+    `💥 קיפאונים (deadlocks): <b>${m.deadlocks ?? 0}</b> · ביטולי טרנזקציה: <b>${rbPct.toFixed(2)}%</b>\n\n` +
     `🔎 חיפושים בדקה האחרונה: <b>${rate}</b>\n` +
     `🕐 חיפושים בשעה האחרונה: <b>${m.searches_last_hour ?? 0}</b>\n` +
     `📅 חיפושים ב-24 שעות: <b>${m.searches_today ?? 0}</b>\n` +
-    `🎯 יעילות מטמון: <b>${m.cache_hit_ratio ?? 0}%</b>\n\n` +
+    `🎯 יעילות מטמון: <b>${m.cache_hit_ratio ?? 0}%</b> · אינדקסים: <b>${m.index_hit_ratio ?? 0}%</b>\n` +
+    `📥 שורות שנקראו: <b>${(m.tuples_read ?? 0).toLocaleString()}</b> · נכתבו: <b>${(m.tuples_written ?? 0).toLocaleString()}</b>\n\n` +
     `💾 <b>אחסון</b>: ${fmtBytes(storage)} מתוך ${fmtBytes(PLAN_STORAGE_BYTES)} (${Math.round(storagePct)}%)\n` +
     `<code>${bar(storagePct)}</code>\n` +
     `נותרו: <b>${fmtBytes(Math.max(0, PLAN_STORAGE_BYTES - storage))}</b>\n` +
-    `🎬 מאגר הסרטים תופס: ${fmtBytes(m.movies_bytes ?? 0)}\n\n` +
+    `🎬 מאגר הסרטים: ${fmtBytes(m.movies_bytes ?? 0)} (מתוכו אינדקסים: ${fmtBytes(m.movies_index_bytes ?? 0)})\n` +
+    `👤 טבלת משתמשים: ${fmtBytes(m.users_bytes ?? 0)} · 🗒️ לוגים/מטמון: ${fmtBytes(m.logs_bytes ?? 0)}\n` +
+    `📝 יומן כתיבה (WAL): ${fmtBytes(m.wal_bytes ?? 0)} · קבצים זמניים: ${fmtBytes(m.temp_bytes ?? 0)} (${m.temp_files ?? 0})\n\n` +
     `🌐 <b>רוחב פס (משוער החודש)</b>: ${fmtBytes(bandwidth)} מתוך ${fmtBytes(PLAN_BANDWIDTH_BYTES)} (${bwPct.toFixed(1)}%)\n` +
     `<code>${bar(bwPct)}</code>\n\n` +
+    `📊 <b>פעילות היום</b>\n` +
+    `• משתמשים חדשים: <b>${m.new_users_today ?? 0}</b> · פעילים: <b>${m.active_users_today ?? 0}</b>\n` +
+    `• סרטים חדשים שנוספו: <b>${m.new_movies_today ?? 0}</b>\n` +
+    `• חסומים: <b>${m.blocked_users ?? 0}</b> · פרימיום: <b>${m.premium_users ?? 0}</b>\n` +
+    `• שורות במטמון חיפוש: <b>${m.cache_rows ?? 0}</b>\n\n` +
+    `🕒 זמן פעילות השרת: <b>${uptime}</b>\n` +
     `👤 משתמשים: <b>${m.users_count ?? 0}</b> · 👥 קבוצות: <b>${m.groups_count ?? 0}</b> · 🎬 סרטים: <b>${movies.toLocaleString()}</b>`
   );
 }

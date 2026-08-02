@@ -1648,9 +1648,6 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
     return;
   }
 
-  if (st.state === "awaiting_prem_search") {
-    // handled below
-  }
   if (st.state === "awaiting_blocked_word") {
     await setAdminState(userId, null);
     const parts = text.split(/[,\n]/).map((w) => w.trim().toLowerCase()).filter(Boolean);

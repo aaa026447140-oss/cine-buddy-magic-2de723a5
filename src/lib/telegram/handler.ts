@@ -12,7 +12,7 @@ import {
   tg,
 } from "./api";
 import { ADMIN_ID, PAGE_SIZE, STAR_AMOUNTS } from "./constants";
-import { formatDuration, formatWhen, isInappropriateQuery } from "./moderation";
+import { formatDuration, formatWhen, isInappropriateQuery, matchesBlockedWords } from "./moderation";
 import {
   addAdmin,
   addSourceChannel,
@@ -71,6 +71,11 @@ import {
   searchesUsedToday,
   premiumIdsAmong,
   consumeSearch,
+  listBlockedWords,
+  addBlockedWord,
+  removeBlockedWord,
+  resetDailyQuotaForAll,
+  serverMetrics,
   type BotSettings,
   type BotUserRow,
 } from "./db";
@@ -87,6 +92,7 @@ import {
   supportMenuKeyboard,
   quotaMenuKeyboard,
   quotaAdminKeyboard,
+  blockedWordsKeyboard,
 } from "./keyboards";
 
 let _me: { id: number; username: string } | null = null;
@@ -318,6 +324,91 @@ function quotaAdminText(s: BotSettings): string {
 
 async function renderQuotaAdmin(chatId: number, messageId: number, s: BotSettings) {
   await editMessageText(chatId, messageId, quotaAdminText(s), { reply_markup: quotaAdminKeyboard(s) }).catch(() => {});
+}
+
+// ───── Blocked words ─────
+async function renderBlockedWords(chatId: number, messageId: number) {
+  const words = await listBlockedWords(true).catch(() => [] as string[]);
+  const text =
+    `🚫 <b>מילים חסומות</b>\n\n` +
+    `חיפוש שמכיל אחת מהמילים האלה יגרום לחסימה אוטומטית מדורגת.\n` +
+    `סה״כ מילים: <b>${words.length}</b>\n\n` +
+    `לחיצה על מילה תסיר אותה מהרשימה.`;
+  await editMessageText(chatId, messageId, text, { reply_markup: blockedWordsKeyboard(words.slice(0, 60)) }).catch(() => {});
+}
+
+// ───── Server load meter ─────
+const PLAN_STORAGE_BYTES = 8 * 1024 * 1024 * 1024; // 8GB storage on the current plan
+const PLAN_BANDWIDTH_BYTES = 250 * 1024 * 1024 * 1024; // 250GB monthly transfer
+
+function fmtBytes(n: number) {
+  if (!n) return "0 B";
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  let v = n;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${u[i]}`;
+}
+
+function bar(pct: number) {
+  const filled = Math.max(0, Math.min(10, Math.round(pct / 10)));
+  return "█".repeat(filled) + "░".repeat(10 - filled);
+}
+
+function loadLabel(pct: number) {
+  if (pct < 40) return "🟢 תקין";
+  if (pct < 70) return "🟡 עומס בינוני";
+  if (pct < 90) return "🟠 עומס גבוה — שקול להפעיל מגבלת חיפושים";
+  return "🔴 עומס קריטי — מומלץ להפעיל מגבלת חיפושים";
+}
+
+async function serverLoadText(): Promise<string> {
+  const m = await serverMetrics().catch(() => ({} as Record<string, number>));
+  const conns = m.connections ?? 0;
+  const maxConns = m.max_connections || 60;
+  const connPct = Math.min(100, (conns / maxConns) * 100);
+  const rate = m.searches_last_min ?? 0;
+  const ratePct = Math.min(100, (rate / 120) * 100); // 120 חיפושים/דקה = 100%
+  const activePct = Math.min(100, ((m.active_queries ?? 0) / 10) * 100);
+  const load = Math.round(Math.max(connPct, ratePct, activePct));
+  const storage = m.db_bytes ?? 0;
+  const storagePct = Math.min(100, (storage / PLAN_STORAGE_BYTES) * 100);
+  const bandwidth = (m.searches_today ?? 0) * 18 * 1024; // הערכה: ~18KB לפעולה
+  const bwPct = Math.min(100, (bandwidth / PLAN_BANDWIDTH_BYTES) * 100);
+  const now = new Date().toLocaleTimeString("he-IL", { timeZone: "Asia/Jerusalem" });
+  return (
+    `📈 <b>מד עומס שרת</b> · ${now}\n\n` +
+    `⚙️ עומס כללי: <b>${load}%</b>\n<code>${bar(load)}</code>\n${loadLabel(load)}\n\n` +
+    `🔌 חיבורים: <b>${conns}/${maxConns}</b> (${Math.round(connPct)}%)\n` +
+    `⚡ שאילתות פעילות כרגע: <b>${m.active_queries ?? 0}</b>\n` +
+    `🔎 חיפושים בדקה האחרונה: <b>${rate}</b>\n` +
+    `🕐 חיפושים בשעה האחרונה: <b>${m.searches_last_hour ?? 0}</b>\n` +
+    `📅 חיפושים ב-24 שעות: <b>${m.searches_today ?? 0}</b>\n` +
+    `🎯 יעילות מטמון: <b>${m.cache_hit_ratio ?? 0}%</b>\n\n` +
+    `💾 <b>אחסון</b>: ${fmtBytes(storage)} מתוך ${fmtBytes(PLAN_STORAGE_BYTES)} (${Math.round(storagePct)}%)\n` +
+    `<code>${bar(storagePct)}</code>\n` +
+    `נותרו: <b>${fmtBytes(Math.max(0, PLAN_STORAGE_BYTES - storage))}</b>\n` +
+    `🎬 מאגר הסרטים תופס: ${fmtBytes(m.movies_bytes ?? 0)}\n\n` +
+    `🌐 <b>רוחב פס (משוער החודש)</b>: ${fmtBytes(bandwidth)} מתוך ${fmtBytes(PLAN_BANDWIDTH_BYTES)} (${bwPct.toFixed(1)}%)\n` +
+    `<code>${bar(bwPct)}</code>\n\n` +
+    `👤 משתמשים: <b>${m.users_count ?? 0}</b> · 👥 קבוצות: <b>${m.groups_count ?? 0}</b> · 🎬 סרטים: <b>${(m.movies_count ?? 0).toLocaleString()}</b>`
+  );
+}
+
+async function renderServerLoad(chatId: number, messageId: number) {
+  const kb = {
+    inline_keyboard: [
+      [{ text: "🔄 רענן", callback_data: "admin_load" }],
+      [{ text: "« חזרה", callback_data: "admin_open" }],
+    ],
+  };
+  // Live view: refresh the same message twice a second for ~10 seconds.
+  for (let i = 0; i < 20; i++) {
+    const text = await serverLoadText();
+    const ok = await editMessageText(chatId, messageId, text, { reply_markup: kb }).then(() => true).catch(() => false);
+    if (!ok && i > 0) break;
+    await new Promise((r) => setTimeout(r, 500));
+  }
 }
 
 async function requireSubscriptionOrPrompt(
@@ -556,7 +647,9 @@ function blockedNotice(u: { blocked_until?: string | null; block_reason?: string
  * Returns true when the search must not proceed.
  */
 async function moderationGate(chatId: number, userId: number, query: string, replyTo?: number) {
-  if (!isInappropriateQuery(query)) return false;
+  const words = await listBlockedWords().catch(() => [] as string[]);
+  const hit = words.length ? matchesBlockedWords(query, words) : isInappropriateQuery(query);
+  if (!hit) return false;
   const r = await applyAutoBlock(userId, "חיפוש לא הולם").catch(() => null);
   const text = r
     ? "🚫 נחסמת עקב חיפוש לא הולם.\n" +
@@ -1031,6 +1124,14 @@ async function handleAdminCallback(cq: any, data: string) {
       await updateSettings({ quota_enabled: !s.quota_enabled } as any);
       return await renderQuotaAdmin(chatId, messageId, await getSettings());
     }
+    if (data === "admin_q_reset") {
+      await resetDailyQuotaForAll().catch(() => {});
+      await sendMessage(
+        chatId,
+        "♻️ המכסה היומית אופסה לכל המשתמשים.\nהפרימיום והחיפושים הנוספים שנרכשו נשמרו כרגיל.",
+      ).catch(() => {});
+      return await renderQuotaAdmin(chatId, messageId, await getSettings());
+    }
     const prompts: Record<string, string> = {
       admin_q_free: "🔢 שלח את מספר החיפושים החינמיים ליום (0 = ללא חינם):",
       admin_q_p_single: "⚡ שלח את המחיר בכוכבים לחיפוש נוסף חד־פעמי:",
@@ -1202,6 +1303,30 @@ async function handleAdminCallback(cq: any, data: string) {
   }
   if (data === "admin_users") {
     return await renderUsersList(chatId, messageId, { query: "", page: 0, sort: "recent", blockedOnly: false });
+  }
+  if (data === "admin_words") {
+    if (!main) return;
+    return await renderBlockedWords(chatId, messageId);
+  }
+  if (data === "admin_word_add") {
+    if (!main) return;
+    await setAdminState(userId, "awaiting_blocked_word");
+    return await sendMessage(
+      chatId,
+      "➕ שלח את המילה/מילים להוספה לרשימת המילים החסומות (אפשר כמה, מופרדות בפסיק).\nשלח /cancel לביטול.",
+    ).then(() => {}).catch(() => {});
+  }
+  if (data.startsWith("admin_word_rm:")) {
+    if (!main) return;
+    const enc = data.slice("admin_word_rm:".length);
+    let word = "";
+    try { word = Buffer.from(enc, "base64url").toString("utf8"); } catch { word = ""; }
+    if (word) await removeBlockedWord(word).catch(() => {});
+    return await renderBlockedWords(chatId, messageId);
+  }
+  if (data === "admin_load") {
+    if (!main) return;
+    return await renderServerLoad(chatId, messageId);
   }
   if (data.startsWith("admin_prem:")) {
     const [, sort, pageText] = data.split(":");
@@ -1523,6 +1648,17 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
     return;
   }
 
+  if (st.state === "awaiting_blocked_word") {
+    await setAdminState(userId, null);
+    const parts = text.split(/[,\n]/).map((w) => w.trim().toLowerCase()).filter(Boolean);
+    for (const w of parts) await addBlockedWord(w, userId).catch(() => {});
+    await sendMessage(chatId, parts.length ? `✅ נוספו ${parts.length} מילים לרשימה החסומה.` : "❌ לא נשלחה מילה.").catch(() => {});
+    const words = await listBlockedWords(true).catch(() => [] as string[]);
+    await sendMessage(chatId, `🚫 <b>מילים חסומות</b>\nסה״כ: <b>${words.length}</b>`, {
+      reply_markup: blockedWordsKeyboard(words.slice(0, 60)),
+    }).catch(() => {});
+    return;
+  }
   if (st.state === "awaiting_prem_search") {
     await setAdminState(userId, null);
     const results = await searchBotUsers(text, 20);

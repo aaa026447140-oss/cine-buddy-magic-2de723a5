@@ -129,6 +129,44 @@ export async function logSearch(telegram_id: number, query: string) {
   await admin().from("search_log").insert({ telegram_id, query: query.slice(0, 200) } as any);
 }
 
+// ───── Blocked words (moderation dictionary) ─────
+let _wordsCache: { at: number; words: string[] } | null = null;
+
+export async function listBlockedWords(force = false): Promise<string[]> {
+  if (!force && _wordsCache && Date.now() - _wordsCache.at < 60_000) return _wordsCache.words;
+  const { data } = await admin().from("blocked_words" as any).select("word").order("word", { ascending: true });
+  const words = ((data ?? []) as any[]).map((r) => String(r.word));
+  _wordsCache = { at: Date.now(), words };
+  return words;
+}
+
+export async function addBlockedWord(word: string, added_by: number) {
+  const w = word.trim().toLowerCase();
+  if (!w) return;
+  await admin().from("blocked_words" as any).upsert({ word: w, added_by } as any, { onConflict: "word" });
+  _wordsCache = null;
+}
+
+export async function removeBlockedWord(word: string) {
+  await admin().from("blocked_words" as any).delete().eq("word", word);
+  _wordsCache = null;
+}
+
+/** Reset today's used-search counters for everyone (premium/credits untouched). */
+export async function resetDailyQuotaForAll(): Promise<void> {
+  const day = new Date().toISOString().slice(0, 10);
+  await admin().from("search_usage").update({ used: 0 } as any).eq("day", day);
+}
+
+/** Live server/database load metrics. */
+export async function serverMetrics(): Promise<Record<string, number>> {
+  const { data, error } = await admin().rpc("server_metrics" as any);
+  if (error || !data) return {};
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(data as any)) out[k] = Number(v) || 0;
+  return out;
+}
+
 export async function lastSearches(
   telegram_id: number,
   limit = 15,
@@ -371,7 +409,7 @@ async function fetchFastTitleSearchRows(query: string, offset: number, limit: nu
   const to = Math.max(offset, offset + limit - 1);
   let req: any = admin().from("movies").select(MOVIE_RESULT_COLUMNS);
   for (const w of words) req = req.ilike("title", `%${escapePostgrestLike(w)}%`);
-  const { data, error } = await req.range(offset, to);
+  const { data, error } = await req.order("id", { ascending: false }).range(offset, to);
   if (error && words.length > 1) return fetchFastTitleSearchRows(words[0], offset, limit);
   if (error) throw error;
   const rows = (data ?? []) as SearchMovieRow[];
@@ -384,7 +422,7 @@ function buildWordSearchRequest(query: string, withCount: boolean): any {
   const countMode = "planned";
   let req: any = admin().from("movies").select(MOVIE_RESULT_COLUMNS, withCount ? { count: countMode } : undefined);
   for (const w of words) req = req.or(ilikeAnyField(w));
-  return req;
+  return req.order("id", { ascending: false });
 }
 
 function pageSizeFallback(limit: number) {
@@ -417,7 +455,7 @@ async function fetchRegularTitleCandidates(parsed: ParsedRegularSearch): Promise
   for (const word of parsed.keywords.slice(0, Math.min(SEARCH_WORD_LIMIT, 4))) {
     req = req.ilike("title", `%${escapePostgrestLike(word)}%`);
   }
-  const { data, error } = await req.range(0, REGULAR_SEARCH_SCAN_LIMIT - 1);
+  const { data, error } = await req.order("id", { ascending: false }).range(0, REGULAR_SEARCH_SCAN_LIMIT - 1);
   if (error) throw error;
   return (data ?? []) as SearchMovieRow[];
 }

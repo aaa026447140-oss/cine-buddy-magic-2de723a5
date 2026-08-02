@@ -158,12 +158,7 @@ export async function resetDailyQuotaForAll(): Promise<void> {
   await admin().from("search_usage").update({ used: 0 } as any).eq("day", day);
 }
 
-/**
- * Live server/database load metrics.
- * The RPC is heavy, so we cache the result briefly and always fall back to the
- * last good snapshot instead of returning an empty object (which rendered as
- * "הנתונים לא נטענו").
- */
+/** One internally consistent database snapshot, with a last-good fallback. */
 let _metricsCache: { at: number; m: Record<string, number> } | null = null;
 let _metricsInflight: Promise<Record<string, number>> | null = null;
 
@@ -193,11 +188,7 @@ export async function serverMetrics(force = false): Promise<Record<string, numbe
   }
 }
 
-/**
- * Single source of truth for the movie count. An exact COUNT on a multi-million
- * row table can time out and come back as null (which showed up as "0 movies").
- * We cache the last good value and fall back to the planner estimate instead.
- */
+/** Exact trigger-maintained movie count from the metrics snapshot. */
 let _moviesCountCache: { at: number; n: number } | null = null;
 
 export async function moviesCount(force = false): Promise<number> {

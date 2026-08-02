@@ -339,8 +339,6 @@ async function renderBlockedWords(chatId: number, messageId: number) {
 }
 
 // ───── Server load meter ─────
-const PLAN_STORAGE_BYTES = 8 * 1024 * 1024 * 1024; // 8GB storage on the current plan
-
 function fmtBytes(n: number) {
   if (!n) return "0 B";
   const u = ["B", "KB", "MB", "GB", "TB"];
@@ -350,20 +348,8 @@ function fmtBytes(n: number) {
   return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${u[i]}`;
 }
 
-function bar(pct: number) {
-  const filled = Math.max(0, Math.min(10, Math.round(pct / 10)));
-  return "█".repeat(filled) + "░".repeat(10 - filled);
-}
-
-function loadLabel(pct: number) {
-  if (pct < 40) return "🟢 תקין";
-  if (pct < 70) return "🟡 עומס בינוני";
-  if (pct < 90) return "🟠 עומס גבוה — שקול להפעיל מגבלת חיפושים";
-  return "🔴 עומס קריטי — מומלץ להפעיל מגבלת חיפושים";
-}
-
-async function serverLoadText(): Promise<string> {
-  const m = await serverMetrics().catch(() => ({} as Record<string, number>));
+async function serverLoadText(force = false): Promise<string> {
+  const m = await serverMetrics(force).catch(() => ({} as Record<string, number>));
   if (!Object.keys(m).length) {
     return `📈 <b>מד עומס שרת</b>\n\n⏳ צילום המצב לא התקבל — לחץ על רענן.`;
   }
@@ -372,11 +358,7 @@ async function serverLoadText(): Promise<string> {
   const maxConns = m.max_connections || 60;
   const connPct = Math.min(100, (conns / maxConns) * 100);
   const rate = m.searches_last_min ?? 0;
-  const ratePct = Math.min(100, (rate / 120) * 100); // 120 חיפושים/דקה = 100%
-  const activePct = Math.min(100, ((m.active_queries ?? 0) / 10) * 100);
-  const load = Math.round(Math.max(connPct, ratePct, activePct));
   const storage = m.db_bytes ?? 0;
-  const storagePct = Math.min(100, (storage / PLAN_STORAGE_BYTES) * 100);
   const capturedAt = new Date((m.captured_at_epoch ?? Date.now() / 1000) * 1000);
   const now = capturedAt.toLocaleTimeString("he-IL", { timeZone: "Asia/Jerusalem" });
   const uptime = (() => {
@@ -392,8 +374,7 @@ async function serverLoadText(): Promise<string> {
   const rbPct = commits + rollbacks > 0 ? (rollbacks / (commits + rollbacks)) * 100 : 0;
   return (
     `📈 <b>מד עומס שרת</b> · צילום מצב ${now}\n` +
-    `✅ כל הנתונים נמדדו באותו רגע\n\n` +
-    `⚙️ עומס כללי: <b>${load}%</b>\n<code>${bar(load)}</code>\n${loadLabel(load)}\n\n` +
+    `✅ נתונים ישירים שנמדדו באותו רגע — ללא הערכות\n\n` +
     `🧠 <b>הגדרות זיכרון מאומתות</b>\n` +
     `• מטמון פנימי (shared_buffers): ${fmtBytes(shared)}\n` +
     `• יעד מטמון (effective_cache): ${fmtBytes(effCache)}\n` +
@@ -410,9 +391,7 @@ async function serverLoadText(): Promise<string> {
     `📅 חיפושים ב-24 שעות: <b>${m.searches_today ?? 0}</b>\n` +
     `🎯 יעילות מטמון: <b>${m.cache_hit_ratio ?? 0}%</b> · אינדקסים: <b>${m.index_hit_ratio ?? 0}%</b>\n` +
     `📥 שורות שנקראו: <b>${(m.tuples_read ?? 0).toLocaleString()}</b> · נכתבו: <b>${(m.tuples_written ?? 0).toLocaleString()}</b>\n\n` +
-    `💾 <b>אחסון</b>: ${fmtBytes(storage)} מתוך ${fmtBytes(PLAN_STORAGE_BYTES)} (${Math.round(storagePct)}%)\n` +
-    `<code>${bar(storagePct)}</code>\n` +
-    `נותרו: <b>${fmtBytes(Math.max(0, PLAN_STORAGE_BYTES - storage))}</b>\n` +
+    `💾 <b>גודל מסד הנתונים בפועל</b>: ${fmtBytes(storage)}\n` +
     `🎬 מאגר הסרטים: ${fmtBytes(m.movies_bytes ?? 0)} (מתוכו אינדקסים: ${fmtBytes(m.movies_index_bytes ?? 0)})\n` +
     `👤 טבלת משתמשים: ${fmtBytes(m.users_bytes ?? 0)} · 🗒️ לוגים/מטמון: ${fmtBytes(m.logs_bytes ?? 0)}\n` +
     `📝 יומן כתיבה (WAL): ${fmtBytes(m.wal_bytes ?? 0)} · קבצים זמניים: ${fmtBytes(m.temp_bytes ?? 0)} (${m.temp_files ?? 0})\n\n` +
@@ -436,7 +415,7 @@ async function renderServerLoad(chatId: number, messageId: number) {
   // Single snapshot + refresh button. A long polling loop here kept the webhook
   // request open for ~10s, and Telegram serialises updates per chat — that made
   // every other admin button feel stuck/slow while the meter was running.
-  const text = await serverLoadText();
+  const text = await serverLoadText(true);
   await editMessageText(chatId, messageId, text, { reply_markup: kb }).catch(() => {});
 }
 

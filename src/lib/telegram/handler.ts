@@ -562,7 +562,9 @@ function blockedNotice(u: { blocked_until?: string | null; block_reason?: string
  * Returns true when the search must not proceed.
  */
 async function moderationGate(chatId: number, userId: number, query: string, replyTo?: number) {
-  if (!isInappropriateQuery(query)) return false;
+  const words = await listBlockedWords().catch(() => [] as string[]);
+  const hit = words.length ? matchesBlockedWords(query, words) : isInappropriateQuery(query);
+  if (!hit) return false;
   const r = await applyAutoBlock(userId, "חיפוש לא הולם").catch(() => null);
   const text = r
     ? "🚫 נחסמת עקב חיפוש לא הולם.\n" +

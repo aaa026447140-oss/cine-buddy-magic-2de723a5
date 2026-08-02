@@ -1219,6 +1219,30 @@ async function handleAdminCallback(cq: any, data: string) {
   if (data === "admin_users") {
     return await renderUsersList(chatId, messageId, { query: "", page: 0, sort: "recent", blockedOnly: false });
   }
+  if (data === "admin_words") {
+    if (!main) return;
+    return await renderBlockedWords(chatId, messageId);
+  }
+  if (data === "admin_word_add") {
+    if (!main) return;
+    await setAdminState(userId, "awaiting_blocked_word");
+    return await sendMessage(
+      chatId,
+      "➕ שלח את המילה/מילים להוספה לרשימת המילים החסומות (אפשר כמה, מופרדות בפסיק).\nשלח /cancel לביטול.",
+    ).then(() => {}).catch(() => {});
+  }
+  if (data.startsWith("admin_word_rm:")) {
+    if (!main) return;
+    const enc = data.slice("admin_word_rm:".length);
+    let word = "";
+    try { word = Buffer.from(enc, "base64url").toString("utf8"); } catch { word = ""; }
+    if (word) await removeBlockedWord(word).catch(() => {});
+    return await renderBlockedWords(chatId, messageId);
+  }
+  if (data === "admin_load") {
+    if (!main) return;
+    return await renderServerLoad(chatId, messageId);
+  }
   if (data.startsWith("admin_prem:")) {
     const [, sort, pageText] = data.split(":");
     return await renderPremiumList(chatId, messageId, {

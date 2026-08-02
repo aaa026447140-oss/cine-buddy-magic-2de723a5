@@ -159,16 +159,12 @@ export function adminPanelKeyboard(isMain: boolean) {
     rows.push([{ text: "🔒 ניהול ערוצי חובה", callback_data: "admin_required" }]);
   }
   rows.push([{ text: "🔎 הגדרת קבוצת חיפוש", callback_data: "admin_set_search_group" }]);
-  if (isMain) {
-    rows.push([{ text: "🎟️ ניהול חיפושים ומחירים", callback_data: "admin_quota" }]);
-  }
+  rows.push([{ text: "🎟️ ניהול חיפושים ומחירים", callback_data: "admin_quota" }]);
   rows.push([{ text: "📊 סטטיסטיקות", callback_data: "admin_stats" }]);
-  if (isMain) {
-    rows.push([
-      { text: "🚫 מילים חסומות", callback_data: "admin_words" },
-      { text: "📈 מד עומס שרת", callback_data: "admin_load" },
-    ]);
-  }
+  rows.push([
+    { text: "🚫 מילים חסומות", callback_data: "admin_words" },
+    { text: "📈 מד עומס שרת", callback_data: "admin_load" },
+  ]);
   rows.push([
     { text: "👤 משתמשים", callback_data: "admin_users" },
     { text: "🚫 משתמשים חסומים", callback_data: "admin_ul:recent:0:1" },
@@ -183,13 +179,18 @@ export function adminPanelKeyboard(isMain: boolean) {
   return { inline_keyboard: rows };
 }
 
-export function sourceChannelsKeyboard(channels: { chat_id: number; username: string | null; title: string | null }[]) {
+export function sourceChannelsKeyboard(
+  channels: { chat_id: number; username: string | null; title: string | null }[],
+  canManage: boolean = true,
+) {
   const rows: any[][] = [];
-  for (const c of channels) {
-    const label = `❌ ${c.title || c.username || c.chat_id}`;
-    rows.push([{ text: label, callback_data: `admin_src_rm_${c.chat_id}` }]);
+  if (canManage) {
+    for (const c of channels) {
+      const label = `❌ ${c.title || c.username || c.chat_id}`;
+      rows.push([{ text: label, callback_data: `admin_src_rm_${c.chat_id}` }]);
+    }
+    rows.push([{ text: "➕ הוסף ערוץ נוסף", callback_data: "admin_src_add" }]);
   }
-  rows.push([{ text: "➕ הוסף ערוץ נוסף", callback_data: "admin_src_add" }]);
   rows.push([{ text: "« חזרה", callback_data: "admin_open" }]);
   return { inline_keyboard: rows };
 }

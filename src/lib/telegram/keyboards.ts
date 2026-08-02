@@ -62,6 +62,7 @@ export function quotaAdminKeyboard(s: BotSettings) {
       [{ text: `📅 מחיר חיפוש יומי קבוע: ${s.price_daily_extra} ⭐`, callback_data: "admin_q_p_daily" }],
       [{ text: `💎 מחיר פרימיום: ${s.price_premium} ⭐`, callback_data: "admin_q_p_premium" }],
       [{ text: "💎 ניהול פרימיום למשתמשים", callback_data: "admin_prem:recent:0" }],
+      [{ text: "♻️ אפס את המכסה היומית לכולם", callback_data: "admin_q_reset" }],
       [{ text: "« חזרה", callback_data: "admin_open" }],
     ],
   };
@@ -162,6 +163,12 @@ export function adminPanelKeyboard(isMain: boolean) {
     rows.push([{ text: "🎟️ ניהול חיפושים ומחירים", callback_data: "admin_quota" }]);
   }
   rows.push([{ text: "📊 סטטיסטיקות", callback_data: "admin_stats" }]);
+  if (isMain) {
+    rows.push([
+      { text: "🚫 מילים חסומות", callback_data: "admin_words" },
+      { text: "📈 מד עומס שרת", callback_data: "admin_load" },
+    ]);
+  }
   rows.push([
     { text: "👤 משתמשים", callback_data: "admin_users" },
     { text: "🚫 משתמשים חסומים", callback_data: "admin_ul:recent:0:1" },
@@ -196,6 +203,21 @@ export function adminsListKeyboard(admins: { telegram_id: number; expires_at: st
     rows.push([{ text: label, callback_data: `admin_rm_${a.telegram_id}` }]);
   }
   rows.push([{ text: "➕ הוסף אדמין", callback_data: "admin_add" }]);
+  rows.push([{ text: "« חזרה", callback_data: "admin_open" }]);
+  return { inline_keyboard: rows };
+}
+
+/** Blocked-word dictionary management. */
+export function blockedWordsKeyboard(words: string[]) {
+  const rows: any[][] = [];
+  for (let i = 0; i < words.length; i += 2) {
+    const pair = words.slice(i, i + 2).map((w) => ({
+      text: `❌ ${truncate(w, 20)}`,
+      callback_data: `admin_word_rm:${Buffer.from(w, "utf8").toString("base64url").slice(0, 50)}`,
+    }));
+    rows.push(pair);
+  }
+  rows.push([{ text: "➕ הוסף מילה חסומה", callback_data: "admin_word_add" }]);
   rows.push([{ text: "« חזרה", callback_data: "admin_open" }]);
   return { inline_keyboard: rows };
 }

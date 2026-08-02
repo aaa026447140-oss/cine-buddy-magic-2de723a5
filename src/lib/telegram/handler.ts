@@ -1522,6 +1522,11 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
     st.state === "awaiting_source_channel_add" ||
     st.state === "awaiting_required_channel"
   ) {
+    // Source/required channel configuration is main-admin only.
+    if (!isMainAdmin(userId)) {
+      await setAdminState(userId, null).catch(() => {});
+      return;
+    }
     const target =
       st.state === "awaiting_required_channel" ? "required" : "source";
     const chatRef = text.startsWith("@") || text.startsWith("-") || /^\d+$/.test(text) ? text : `@${text}`;

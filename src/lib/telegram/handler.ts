@@ -76,6 +76,7 @@ import {
   removeBlockedWord,
   resetDailyQuotaForAll,
   serverMetrics,
+  moviesCount,
   type BotSettings,
   type BotUserRow,
 } from "./db";

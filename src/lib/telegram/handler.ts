@@ -1115,8 +1115,8 @@ async function handleAdminCallback(cq: any, data: string) {
       data.startsWith("admin_req_") ||
       data === "admin_manage" ||
       data === "admin_add" ||
-      data === "admin_quota" ||
-      data.startsWith("admin_q_") ||
+      data === "admin_src_add" ||
+      data.startsWith("admin_src_rm_") ||
       data.startsWith("admin_rm_"))
   ) {
     return;
@@ -1225,7 +1225,7 @@ async function handleAdminCallback(cq: any, data: string) {
         chatId,
         messageId,
         `🎬 <b>ערוצי סרטים</b>\n\n${lines}\n\nלחיצה על ❌ תסיר ערוץ. כל הסרטים שכבר נאספו נשמרים במאגר.`,
-        { reply_markup: sourceChannelsKeyboard(list) },
+        { reply_markup: sourceChannelsKeyboard(list, main) },
       ).catch(() => {});
     }
     case "admin_src_add":

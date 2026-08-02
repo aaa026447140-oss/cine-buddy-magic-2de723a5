@@ -1039,6 +1039,14 @@ async function handleAdminCallback(cq: any, data: string) {
       await updateSettings({ quota_enabled: !s.quota_enabled } as any);
       return await renderQuotaAdmin(chatId, messageId, await getSettings());
     }
+    if (data === "admin_q_reset") {
+      await resetDailyQuotaForAll().catch(() => {});
+      await sendMessage(
+        chatId,
+        "♻️ המכסה היומית אופסה לכל המשתמשים.\nהפרימיום והחיפושים הנוספים שנרכשו נשמרו כרגיל.",
+      ).catch(() => {});
+      return await renderQuotaAdmin(chatId, messageId, await getSettings());
+    }
     const prompts: Record<string, string> = {
       admin_q_free: "🔢 שלח את מספר החיפושים החינמיים ליום (0 = ללא חינם):",
       admin_q_p_single: "⚡ שלח את המחיר בכוכבים לחיפוש נוסף חד־פעמי:",

@@ -1313,11 +1313,9 @@ async function handleAdminCallback(cq: any, data: string) {
     return await renderUsersList(chatId, messageId, { query: "", page: 0, sort: "recent", blockedOnly: false });
   }
   if (data === "admin_words") {
-    if (!main) return;
     return await renderBlockedWords(chatId, messageId);
   }
   if (data === "admin_word_add") {
-    if (!main) return;
     await setAdminState(userId, "awaiting_blocked_word");
     return await sendMessage(
       chatId,
@@ -1325,7 +1323,6 @@ async function handleAdminCallback(cq: any, data: string) {
     ).then(() => {}).catch(() => {});
   }
   if (data.startsWith("admin_word_rm:")) {
-    if (!main) return;
     const enc = data.slice("admin_word_rm:".length);
     let word = "";
     try { word = Buffer.from(enc, "base64url").toString("utf8"); } catch { word = ""; }
@@ -1333,7 +1330,6 @@ async function handleAdminCallback(cq: any, data: string) {
     return await renderBlockedWords(chatId, messageId);
   }
   if (data === "admin_load") {
-    if (!main) return;
     return await renderServerLoad(chatId, messageId);
   }
   if (data.startsWith("admin_prem:")) {

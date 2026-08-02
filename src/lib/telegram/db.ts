@@ -167,6 +167,35 @@ export async function serverMetrics(): Promise<Record<string, number>> {
   return out;
 }
 
+/**
+ * Single source of truth for the movie count. An exact COUNT on a multi-million
+ * row table can time out and come back as null (which showed up as "0 movies").
+ * We cache the last good value and fall back to the planner estimate instead.
+ */
+let _moviesCountCache: { at: number; n: number } | null = null;
+
+export async function moviesCount(force = false): Promise<number> {
+  if (!force && _moviesCountCache && Date.now() - _moviesCountCache.at < 60_000) {
+    return _moviesCountCache.n;
+  }
+  let n = 0;
+  try {
+    const { count, error } = await admin()
+      .from("movies")
+      .select("*", { count: "estimated", head: true });
+    if (!error) n = Number(count ?? 0);
+  } catch {
+    /* ignore */
+  }
+  if (!n) {
+    const m = await serverMetrics().catch(() => ({} as Record<string, number>));
+    n = Number(m.movies_count) || 0;
+  }
+  if (!n) return _moviesCountCache?.n ?? 0;
+  _moviesCountCache = { at: Date.now(), n };
+  return n;
+}
+
 export async function lastSearches(
   telegram_id: number,
   limit = 15,
@@ -850,8 +879,8 @@ export async function consumeSearch(telegram_id: number, limit: number): Promise
 
 export async function stats() {
   const a = admin();
-  const [{ count: movies }, { count: users }, { count: groups }, { data: payments }] = await Promise.all([
-    a.from("movies").select("*", { count: "exact", head: true }),
+  const [movies, { count: users }, { count: groups }, { data: payments }] = await Promise.all([
+    moviesCount(),
     a.from("bot_users").select("*", { count: "exact", head: true }).eq("is_blocked", false),
     a.from("bot_groups").select("*", { count: "exact", head: true }).eq("is_active", true),
     a.from("star_payments").select("stars_amount"),

@@ -104,6 +104,24 @@ export type Database = {
         }
         Relationships: []
       }
+      bot_metric_counters: {
+        Row: {
+          metric: string
+          updated_at: string
+          value: number
+        }
+        Insert: {
+          metric: string
+          updated_at?: string
+          value?: number
+        }
+        Update: {
+          metric?: string
+          updated_at?: string
+          value?: number
+        }
+        Relationships: []
+      }
       bot_settings: {
         Row: {
           builder_username: string | null

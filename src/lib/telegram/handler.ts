@@ -339,9 +339,6 @@ async function renderBlockedWords(chatId: number, messageId: number) {
 }
 
 // ───── Server load meter ─────
-const PLAN_STORAGE_BYTES = 8 * 1024 * 1024 * 1024; // 8GB storage on the current plan
-const PLAN_BANDWIDTH_BYTES = 250 * 1024 * 1024 * 1024; // 250GB monthly transfer
-
 function fmtBytes(n: number) {
   if (!n) return "0 B";
   const u = ["B", "KB", "MB", "GB", "TB"];
@@ -351,42 +348,19 @@ function fmtBytes(n: number) {
   return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${u[i]}`;
 }
 
-function bar(pct: number) {
-  const filled = Math.max(0, Math.min(10, Math.round(pct / 10)));
-  return "█".repeat(filled) + "░".repeat(10 - filled);
-}
-
-function loadLabel(pct: number) {
-  if (pct < 40) return "🟢 תקין";
-  if (pct < 70) return "🟡 עומס בינוני";
-  if (pct < 90) return "🟠 עומס גבוה — שקול להפעיל מגבלת חיפושים";
-  return "🔴 עומס קריטי — מומלץ להפעיל מגבלת חיפושים";
-}
-
-async function serverLoadText(): Promise<string> {
-  const [m, movies] = await Promise.all([
-    serverMetrics().catch(() => ({} as Record<string, number>)),
-    moviesCount().catch(() => 0),
-  ]);
+async function serverLoadText(force = false): Promise<string> {
+  const m = await serverMetrics(force).catch(() => ({} as Record<string, number>));
   if (!Object.keys(m).length) {
-    const retry = await serverMetrics(true).catch(() => ({} as Record<string, number>));
-    if (!Object.keys(retry).length) {
-      return `📈 <b>מד עומס שרת</b>\n\n⏳ הנתונים לא נטענו כרגע — נסה לרענן שוב.\n🎬 סרטים במאגר: <b>${movies.toLocaleString()}</b>`;
-    }
-    Object.assign(m, retry);
+    return `📈 <b>מד עומס שרת</b>\n\n⏳ צילום המצב לא התקבל — לחץ על רענן.`;
   }
+  const movies = m.movies_count ?? 0;
   const conns = m.connections ?? 0;
   const maxConns = m.max_connections || 60;
   const connPct = Math.min(100, (conns / maxConns) * 100);
   const rate = m.searches_last_min ?? 0;
-  const ratePct = Math.min(100, (rate / 120) * 100); // 120 חיפושים/דקה = 100%
-  const activePct = Math.min(100, ((m.active_queries ?? 0) / 10) * 100);
-  const load = Math.round(Math.max(connPct, ratePct, activePct));
   const storage = m.db_bytes ?? 0;
-  const storagePct = Math.min(100, (storage / PLAN_STORAGE_BYTES) * 100);
-  const bandwidth = (m.searches_today ?? 0) * 18 * 1024; // הערכה: ~18KB לפעולה
-  const bwPct = Math.min(100, (bandwidth / PLAN_BANDWIDTH_BYTES) * 100);
-  const now = new Date().toLocaleTimeString("he-IL", { timeZone: "Asia/Jerusalem" });
+  const capturedAt = new Date((m.captured_at_epoch ?? Date.now() / 1000) * 1000);
+  const now = capturedAt.toLocaleTimeString("he-IL", { timeZone: "Asia/Jerusalem" });
   const uptime = (() => {
     const s = m.uptime_sec ?? 0;
     const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), mi = Math.floor((s % 3600) / 60);
@@ -394,20 +368,17 @@ async function serverLoadText(): Promise<string> {
   })();
   const shared = m.shared_buffers_bytes ?? 0;
   const effCache = m.effective_cache_bytes ?? 0;
-  const ramEst = effCache > 0 ? effCache * 1.33 : 0; // הערכת RAM לפי הגדרות המסד
   const memPerConn = m.work_mem_bytes ?? 0;
-  const memUsedEst = shared + memPerConn * conns;
-  const memPct = ramEst > 0 ? Math.min(100, (memUsedEst / ramEst) * 100) : 0;
   const commits = m.commits ?? 0;
   const rollbacks = m.rollbacks ?? 0;
   const rbPct = commits + rollbacks > 0 ? (rollbacks / (commits + rollbacks)) * 100 : 0;
   return (
-    `📈 <b>מד עומס שרת</b> · ${now}\n\n` +
-    `⚙️ עומס כללי: <b>${load}%</b>\n<code>${bar(load)}</code>\n${loadLabel(load)}\n\n` +
-    `🧠 <b>זיכרון (RAM)</b>: ~${fmtBytes(memUsedEst)} מתוך ~${fmtBytes(ramEst)} (${Math.round(memPct)}%)\n` +
-    `<code>${bar(memPct)}</code>\n` +
+    `📈 <b>מד עומס שרת</b> · צילום מצב ${now}\n` +
+    `✅ נתונים ישירים שנמדדו באותו רגע — ללא הערכות\n\n` +
+    `🧠 <b>הגדרות זיכרון מאומתות</b>\n` +
     `• מטמון פנימי (shared_buffers): ${fmtBytes(shared)}\n` +
-    `• זיכרון לשאילתה (work_mem): ${fmtBytes(memPerConn)}\n` +
+    `• יעד מטמון (effective_cache): ${fmtBytes(effCache)}\n` +
+    `• זיכרון מרבי לשאילתה (work_mem): ${fmtBytes(memPerConn)}\n` +
     `• זיכרון תחזוקה: ${fmtBytes(m.maintenance_work_mem_bytes ?? 0)}\n\n` +
     `🔌 חיבורים: <b>${conns}/${maxConns}</b> (${Math.round(connPct)}%)\n` +
     `• פנויים: <b>${m.idle_conns ?? 0}</b> · תקועים בטרנזקציה: <b>${m.idle_in_tx ?? 0}</b>\n` +
@@ -420,14 +391,10 @@ async function serverLoadText(): Promise<string> {
     `📅 חיפושים ב-24 שעות: <b>${m.searches_today ?? 0}</b>\n` +
     `🎯 יעילות מטמון: <b>${m.cache_hit_ratio ?? 0}%</b> · אינדקסים: <b>${m.index_hit_ratio ?? 0}%</b>\n` +
     `📥 שורות שנקראו: <b>${(m.tuples_read ?? 0).toLocaleString()}</b> · נכתבו: <b>${(m.tuples_written ?? 0).toLocaleString()}</b>\n\n` +
-    `💾 <b>אחסון</b>: ${fmtBytes(storage)} מתוך ${fmtBytes(PLAN_STORAGE_BYTES)} (${Math.round(storagePct)}%)\n` +
-    `<code>${bar(storagePct)}</code>\n` +
-    `נותרו: <b>${fmtBytes(Math.max(0, PLAN_STORAGE_BYTES - storage))}</b>\n` +
+    `💾 <b>גודל מסד הנתונים בפועל</b>: ${fmtBytes(storage)}\n` +
     `🎬 מאגר הסרטים: ${fmtBytes(m.movies_bytes ?? 0)} (מתוכו אינדקסים: ${fmtBytes(m.movies_index_bytes ?? 0)})\n` +
     `👤 טבלת משתמשים: ${fmtBytes(m.users_bytes ?? 0)} · 🗒️ לוגים/מטמון: ${fmtBytes(m.logs_bytes ?? 0)}\n` +
     `📝 יומן כתיבה (WAL): ${fmtBytes(m.wal_bytes ?? 0)} · קבצים זמניים: ${fmtBytes(m.temp_bytes ?? 0)} (${m.temp_files ?? 0})\n\n` +
-    `🌐 <b>רוחב פס (משוער החודש)</b>: ${fmtBytes(bandwidth)} מתוך ${fmtBytes(PLAN_BANDWIDTH_BYTES)} (${bwPct.toFixed(1)}%)\n` +
-    `<code>${bar(bwPct)}</code>\n\n` +
     `📊 <b>פעילות היום</b>\n` +
     `• משתמשים חדשים: <b>${m.new_users_today ?? 0}</b> · פעילים: <b>${m.active_users_today ?? 0}</b>\n` +
     `• סרטים חדשים שנוספו: <b>${m.new_movies_today ?? 0}</b>\n` +
@@ -448,7 +415,7 @@ async function renderServerLoad(chatId: number, messageId: number) {
   // Single snapshot + refresh button. A long polling loop here kept the webhook
   // request open for ~10s, and Telegram serialises updates per chat — that made
   // every other admin button feel stuck/slow while the meter was running.
-  const text = await serverLoadText();
+  const text = await serverLoadText(true);
   await editMessageText(chatId, messageId, text, { reply_markup: kb }).catch(() => {});
 }
 

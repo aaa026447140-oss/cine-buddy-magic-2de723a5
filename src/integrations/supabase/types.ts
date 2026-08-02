@@ -554,6 +554,7 @@ export type Database = {
           used: number
         }[]
       }
+      purge_bot_logs: { Args: never; Returns: Json }
       server_metrics: { Args: never; Returns: Json }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }

@@ -1934,7 +1934,7 @@ async function renderPremiumUser(chatId: number, messageId: number, telegramId: 
 
 async function renderSearchHistory(chatId: number, messageId: number, telegramId: number) {
   const u = await getBotUser(telegramId).catch(() => null);
-  const rows = await lastSearches(telegramId, 15).catch(() => []);
+  const rows = await lastSearches(telegramId, 10).catch(() => []);
   const name = u ? escapeHtml(displayUserName(u)) : String(telegramId);
   const body = rows.length
     ? rows.map((r, i) => `${i + 1}. <code>${escapeHtml(r.query)}</code>\n   ${formatWhen(r.created_at)}`).join("\n")
@@ -1942,7 +1942,7 @@ async function renderSearchHistory(chatId: number, messageId: number, telegramId
   await editMessageText(
     chatId,
     messageId,
-    `📜 <b>15 החיפושים האחרונים</b>\n👤 ${name} · <code>${telegramId}</code>\n\n${body}`,
+    `📜 <b>10 החיפושים האחרונים</b>\n👤 ${name} · <code>${telegramId}</code>\n\n${body}`,
     { reply_markup: { inline_keyboard: [[{ text: "« חזרה למשתמש", callback_data: `admin_user_${telegramId}` }]] } },
   ).catch(() => {});
 }

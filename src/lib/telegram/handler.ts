@@ -12,7 +12,7 @@ import {
   tg,
 } from "./api";
 import { ADMIN_ID, PAGE_SIZE, STAR_AMOUNTS } from "./constants";
-import { formatDuration, formatWhen, isInappropriateQuery } from "./moderation";
+import { formatDuration, formatWhen, isInappropriateQuery, matchesBlockedWords } from "./moderation";
 import {
   addAdmin,
   addSourceChannel,
@@ -71,6 +71,11 @@ import {
   searchesUsedToday,
   premiumIdsAmong,
   consumeSearch,
+  listBlockedWords,
+  addBlockedWord,
+  removeBlockedWord,
+  resetDailyQuotaForAll,
+  serverMetrics,
   type BotSettings,
   type BotUserRow,
 } from "./db";
@@ -87,6 +92,7 @@ import {
   supportMenuKeyboard,
   quotaMenuKeyboard,
   quotaAdminKeyboard,
+  blockedWordsKeyboard,
 } from "./keyboards";
 
 let _me: { id: number; username: string } | null = null;

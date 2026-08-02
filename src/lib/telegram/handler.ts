@@ -326,6 +326,91 @@ async function renderQuotaAdmin(chatId: number, messageId: number, s: BotSetting
   await editMessageText(chatId, messageId, quotaAdminText(s), { reply_markup: quotaAdminKeyboard(s) }).catch(() => {});
 }
 
+// ───── Blocked words ─────
+async function renderBlockedWords(chatId: number, messageId: number) {
+  const words = await listBlockedWords(true).catch(() => [] as string[]);
+  const text =
+    `🚫 <b>מילים חסומות</b>\n\n` +
+    `חיפוש שמכיל אחת מהמילים האלה יגרום לחסימה אוטומטית מדורגת.\n` +
+    `סה״כ מילים: <b>${words.length}</b>\n\n` +
+    `לחיצה על מילה תסיר אותה מהרשימה.`;
+  await editMessageText(chatId, messageId, text, { reply_markup: blockedWordsKeyboard(words.slice(0, 60)) }).catch(() => {});
+}
+
+// ───── Server load meter ─────
+const PLAN_STORAGE_BYTES = 8 * 1024 * 1024 * 1024; // 8GB storage on the current plan
+const PLAN_BANDWIDTH_BYTES = 250 * 1024 * 1024 * 1024; // 250GB monthly transfer
+
+function fmtBytes(n: number) {
+  if (!n) return "0 B";
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  let v = n;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${u[i]}`;
+}
+
+function bar(pct: number) {
+  const filled = Math.max(0, Math.min(10, Math.round(pct / 10)));
+  return "█".repeat(filled) + "░".repeat(10 - filled);
+}
+
+function loadLabel(pct: number) {
+  if (pct < 40) return "🟢 תקין";
+  if (pct < 70) return "🟡 עומס בינוני";
+  if (pct < 90) return "🟠 עומס גבוה — שקול להפעיל מגבלת חיפושים";
+  return "🔴 עומס קריטי — מומלץ להפעיל מגבלת חיפושים";
+}
+
+async function serverLoadText(): Promise<string> {
+  const m = await serverMetrics().catch(() => ({} as Record<string, number>));
+  const conns = m.connections ?? 0;
+  const maxConns = m.max_connections || 60;
+  const connPct = Math.min(100, (conns / maxConns) * 100);
+  const rate = m.searches_last_min ?? 0;
+  const ratePct = Math.min(100, (rate / 120) * 100); // 120 חיפושים/דקה = 100%
+  const activePct = Math.min(100, ((m.active_queries ?? 0) / 10) * 100);
+  const load = Math.round(Math.max(connPct, ratePct, activePct));
+  const storage = m.db_bytes ?? 0;
+  const storagePct = Math.min(100, (storage / PLAN_STORAGE_BYTES) * 100);
+  const bandwidth = (m.searches_today ?? 0) * 18 * 1024; // הערכה: ~18KB לפעולה
+  const bwPct = Math.min(100, (bandwidth / PLAN_BANDWIDTH_BYTES) * 100);
+  const now = new Date().toLocaleTimeString("he-IL", { timeZone: "Asia/Jerusalem" });
+  return (
+    `📈 <b>מד עומס שרת</b> · ${now}\n\n` +
+    `⚙️ עומס כללי: <b>${load}%</b>\n<code>${bar(load)}</code>\n${loadLabel(load)}\n\n` +
+    `🔌 חיבורים: <b>${conns}/${maxConns}</b> (${Math.round(connPct)}%)\n` +
+    `⚡ שאילתות פעילות כרגע: <b>${m.active_queries ?? 0}</b>\n` +
+    `🔎 חיפושים בדקה האחרונה: <b>${rate}</b>\n` +
+    `🕐 חיפושים בשעה האחרונה: <b>${m.searches_last_hour ?? 0}</b>\n` +
+    `📅 חיפושים ב-24 שעות: <b>${m.searches_today ?? 0}</b>\n` +
+    `🎯 יעילות מטמון: <b>${m.cache_hit_ratio ?? 0}%</b>\n\n` +
+    `💾 <b>אחסון</b>: ${fmtBytes(storage)} מתוך ${fmtBytes(PLAN_STORAGE_BYTES)} (${Math.round(storagePct)}%)\n` +
+    `<code>${bar(storagePct)}</code>\n` +
+    `נותרו: <b>${fmtBytes(Math.max(0, PLAN_STORAGE_BYTES - storage))}</b>\n` +
+    `🎬 מאגר הסרטים תופס: ${fmtBytes(m.movies_bytes ?? 0)}\n\n` +
+    `🌐 <b>רוחב פס (משוער החודש)</b>: ${fmtBytes(bandwidth)} מתוך ${fmtBytes(PLAN_BANDWIDTH_BYTES)} (${bwPct.toFixed(1)}%)\n` +
+    `<code>${bar(bwPct)}</code>\n\n` +
+    `👤 משתמשים: <b>${m.users_count ?? 0}</b> · 👥 קבוצות: <b>${m.groups_count ?? 0}</b> · 🎬 סרטים: <b>${(m.movies_count ?? 0).toLocaleString()}</b>`
+  );
+}
+
+async function renderServerLoad(chatId: number, messageId: number) {
+  const kb = {
+    inline_keyboard: [
+      [{ text: "🔄 רענן", callback_data: "admin_load" }],
+      [{ text: "« חזרה", callback_data: "admin_open" }],
+    ],
+  };
+  // Live view: refresh the same message twice a second for ~10 seconds.
+  for (let i = 0; i < 20; i++) {
+    const text = await serverLoadText();
+    const ok = await editMessageText(chatId, messageId, text, { reply_markup: kb }).then(() => true).catch(() => false);
+    if (!ok && i > 0) break;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+}
+
 async function requireSubscriptionOrPrompt(
   chatId: number,
   userId: number,

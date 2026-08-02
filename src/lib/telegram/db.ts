@@ -158,13 +158,41 @@ export async function resetDailyQuotaForAll(): Promise<void> {
   await admin().from("search_usage").update({ used: 0 } as any).eq("day", day);
 }
 
-/** Live server/database load metrics. */
-export async function serverMetrics(): Promise<Record<string, number>> {
-  const { data, error } = await admin().rpc("server_metrics" as any);
-  if (error || !data) return {};
-  const out: Record<string, number> = {};
-  for (const [k, v] of Object.entries(data as any)) out[k] = Number(v) || 0;
-  return out;
+/**
+ * Live server/database load metrics.
+ * The RPC is heavy, so we cache the result briefly and always fall back to the
+ * last good snapshot instead of returning an empty object (which rendered as
+ * "הנתונים לא נטענו").
+ */
+let _metricsCache: { at: number; m: Record<string, number> } | null = null;
+let _metricsInflight: Promise<Record<string, number>> | null = null;
+
+export async function serverMetrics(force = false): Promise<Record<string, number>> {
+  if (!force && _metricsCache && Date.now() - _metricsCache.at < 5_000) return _metricsCache.m;
+  if (_metricsInflight) return _metricsInflight;
+  _metricsInflight = (async () => {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const { data, error } = await admin().rpc("server_metrics" as any);
+        if (!error && data) {
+          const out: Record<string, number> = {};
+          for (const [k, v] of Object.entries(data as any)) out[k] = Number(v) || 0;
+          if (Object.keys(out).length) {
+            _metricsCache = { at: Date.now(), m: out };
+            return out;
+          }
+        }
+      } catch {
+        /* retry */
+      }
+    }
+    return _metricsCache?.m ?? {};
+  })();
+  try {
+    return await _metricsInflight;
+  } finally {
+    _metricsInflight = null;
+  }
 }
 
 /**

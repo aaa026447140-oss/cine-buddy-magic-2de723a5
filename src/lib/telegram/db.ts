@@ -850,8 +850,8 @@ export async function consumeSearch(telegram_id: number, limit: number): Promise
 
 export async function stats() {
   const a = admin();
-  const [{ count: movies }, { count: users }, { count: groups }, { data: payments }] = await Promise.all([
-    a.from("movies").select("*", { count: "exact", head: true }),
+  const [movies, { count: users }, { count: groups }, { data: payments }] = await Promise.all([
+    moviesCount(),
     a.from("bot_users").select("*", { count: "exact", head: true }).eq("is_blocked", false),
     a.from("bot_groups").select("*", { count: "exact", head: true }).eq("is_active", true),
     a.from("star_payments").select("stars_amount"),

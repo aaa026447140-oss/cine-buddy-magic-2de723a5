@@ -1649,6 +1649,20 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
   }
 
   if (st.state === "awaiting_prem_search") {
+    // handled below
+  }
+  if (st.state === "awaiting_blocked_word") {
+    await setAdminState(userId, null);
+    const parts = text.split(/[,\n]/).map((w) => w.trim().toLowerCase()).filter(Boolean);
+    for (const w of parts) await addBlockedWord(w, userId).catch(() => {});
+    await sendMessage(chatId, parts.length ? `✅ נוספו ${parts.length} מילים לרשימה החסומה.` : "❌ לא נשלחה מילה.").catch(() => {});
+    const words = await listBlockedWords(true).catch(() => [] as string[]);
+    await sendMessage(chatId, `🚫 <b>מילים חסומות</b>\nסה״כ: <b>${words.length}</b>`, {
+      reply_markup: blockedWordsKeyboard(words.slice(0, 60)),
+    }).catch(() => {});
+    return;
+  }
+  if (st.state === "awaiting_prem_search") {
     await setAdminState(userId, null);
     const results = await searchBotUsers(text, 20);
     const kb: any[][] = await premiumUserRows(results);

@@ -35,6 +35,24 @@ export type Database = {
         }
         Relationships: []
       }
+      blocked_words: {
+        Row: {
+          added_by: number | null
+          created_at: string
+          word: string
+        }
+        Insert: {
+          added_by?: number | null
+          created_at?: string
+          word: string
+        }
+        Update: {
+          added_by?: number | null
+          created_at?: string
+          word?: string
+        }
+        Relationships: []
+      }
       bot_admins: {
         Row: {
           added_by: number
@@ -536,6 +554,7 @@ export type Database = {
           used: number
         }[]
       }
+      server_metrics: { Args: never; Returns: Json }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
     }

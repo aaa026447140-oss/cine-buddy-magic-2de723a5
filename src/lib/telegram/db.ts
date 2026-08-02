@@ -168,25 +168,23 @@ let _metricsCache: { at: number; m: Record<string, number> } | null = null;
 let _metricsInflight: Promise<Record<string, number>> | null = null;
 
 export async function serverMetrics(force = false): Promise<Record<string, number>> {
-  if (!force && _metricsCache && Date.now() - _metricsCache.at < 5_000) return _metricsCache.m;
+  if (!force && _metricsCache && Date.now() - _metricsCache.at < 15_000) return _metricsCache.m;
   if (_metricsInflight) return _metricsInflight;
   _metricsInflight = (async () => {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const { data, error } = await admin().rpc("server_metrics" as any);
-        if (!error && data) {
-          const out: Record<string, number> = {};
-          for (const [k, v] of Object.entries(data as any)) out[k] = Number(v) || 0;
-          if (Object.keys(out).length) {
-            _metricsCache = { at: Date.now(), m: out };
-            return out;
-          }
-        }
-      } catch {
-        /* retry */
-      }
+    try {
+      const { data, error } = await admin().rpc("server_metrics" as any);
+      if (error) throw error;
+      if (!data || typeof data !== "object") throw new Error("Invalid metrics snapshot");
+      const out: Record<string, number> = {};
+      for (const [k, v] of Object.entries(data as any)) out[k] = Number(v) || 0;
+      const required = ["captured_at_epoch", "db_bytes", "movies_count", "connections", "users_count"];
+      if (!required.every((key) => Number.isFinite(out[key]))) throw new Error("Incomplete metrics snapshot");
+      _metricsCache = { at: Date.now(), m: out };
+      return out;
+    } catch (error) {
+      console.error("server_metrics snapshot failed", error);
+      return _metricsCache?.m ?? {};
     }
-    return _metricsCache?.m ?? {};
   })();
   try {
     return await _metricsInflight;
@@ -208,16 +206,10 @@ export async function moviesCount(force = false): Promise<number> {
   }
   let n = 0;
   try {
-    const { count, error } = await admin()
-      .from("movies")
-      .select("*", { count: "estimated", head: true });
-    if (!error) n = Number(count ?? 0);
+    const m = await serverMetrics(force);
+    n = Number(m.movies_count) || 0;
   } catch {
     /* ignore */
-  }
-  if (!n) {
-    const m = await serverMetrics().catch(() => ({} as Record<string, number>));
-    n = Number(m.movies_count) || 0;
   }
   if (!n) return _moviesCountCache?.n ?? 0;
   _moviesCountCache = { at: Date.now(), n };

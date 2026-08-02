@@ -340,7 +340,6 @@ async function renderBlockedWords(chatId: number, messageId: number) {
 
 // ───── Server load meter ─────
 const PLAN_STORAGE_BYTES = 8 * 1024 * 1024 * 1024; // 8GB storage on the current plan
-const PLAN_BANDWIDTH_BYTES = 250 * 1024 * 1024 * 1024; // 250GB monthly transfer
 
 function fmtBytes(n: number) {
   if (!n) return "0 B";
@@ -364,17 +363,11 @@ function loadLabel(pct: number) {
 }
 
 async function serverLoadText(): Promise<string> {
-  const [m, movies] = await Promise.all([
-    serverMetrics().catch(() => ({} as Record<string, number>)),
-    moviesCount().catch(() => 0),
-  ]);
+  const m = await serverMetrics().catch(() => ({} as Record<string, number>));
   if (!Object.keys(m).length) {
-    const retry = await serverMetrics(true).catch(() => ({} as Record<string, number>));
-    if (!Object.keys(retry).length) {
-      return `📈 <b>מד עומס שרת</b>\n\n⏳ הנתונים לא נטענו כרגע — נסה לרענן שוב.\n🎬 סרטים במאגר: <b>${movies.toLocaleString()}</b>`;
-    }
-    Object.assign(m, retry);
+    return `📈 <b>מד עומס שרת</b>\n\n⏳ צילום המצב לא התקבל — לחץ על רענן.`;
   }
+  const movies = m.movies_count ?? 0;
   const conns = m.connections ?? 0;
   const maxConns = m.max_connections || 60;
   const connPct = Math.min(100, (conns / maxConns) * 100);
@@ -384,9 +377,8 @@ async function serverLoadText(): Promise<string> {
   const load = Math.round(Math.max(connPct, ratePct, activePct));
   const storage = m.db_bytes ?? 0;
   const storagePct = Math.min(100, (storage / PLAN_STORAGE_BYTES) * 100);
-  const bandwidth = (m.searches_today ?? 0) * 18 * 1024; // הערכה: ~18KB לפעולה
-  const bwPct = Math.min(100, (bandwidth / PLAN_BANDWIDTH_BYTES) * 100);
-  const now = new Date().toLocaleTimeString("he-IL", { timeZone: "Asia/Jerusalem" });
+  const capturedAt = new Date((m.captured_at_epoch ?? Date.now() / 1000) * 1000);
+  const now = capturedAt.toLocaleTimeString("he-IL", { timeZone: "Asia/Jerusalem" });
   const uptime = (() => {
     const s = m.uptime_sec ?? 0;
     const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), mi = Math.floor((s % 3600) / 60);
@@ -394,20 +386,18 @@ async function serverLoadText(): Promise<string> {
   })();
   const shared = m.shared_buffers_bytes ?? 0;
   const effCache = m.effective_cache_bytes ?? 0;
-  const ramEst = effCache > 0 ? effCache * 1.33 : 0; // הערכת RAM לפי הגדרות המסד
   const memPerConn = m.work_mem_bytes ?? 0;
-  const memUsedEst = shared + memPerConn * conns;
-  const memPct = ramEst > 0 ? Math.min(100, (memUsedEst / ramEst) * 100) : 0;
   const commits = m.commits ?? 0;
   const rollbacks = m.rollbacks ?? 0;
   const rbPct = commits + rollbacks > 0 ? (rollbacks / (commits + rollbacks)) * 100 : 0;
   return (
-    `📈 <b>מד עומס שרת</b> · ${now}\n\n` +
+    `📈 <b>מד עומס שרת</b> · צילום מצב ${now}\n` +
+    `✅ כל הנתונים נמדדו באותו רגע\n\n` +
     `⚙️ עומס כללי: <b>${load}%</b>\n<code>${bar(load)}</code>\n${loadLabel(load)}\n\n` +
-    `🧠 <b>זיכרון (RAM)</b>: ~${fmtBytes(memUsedEst)} מתוך ~${fmtBytes(ramEst)} (${Math.round(memPct)}%)\n` +
-    `<code>${bar(memPct)}</code>\n` +
+    `🧠 <b>הגדרות זיכרון מאומתות</b>\n` +
     `• מטמון פנימי (shared_buffers): ${fmtBytes(shared)}\n` +
-    `• זיכרון לשאילתה (work_mem): ${fmtBytes(memPerConn)}\n` +
+    `• יעד מטמון (effective_cache): ${fmtBytes(effCache)}\n` +
+    `• זיכרון מרבי לשאילתה (work_mem): ${fmtBytes(memPerConn)}\n` +
     `• זיכרון תחזוקה: ${fmtBytes(m.maintenance_work_mem_bytes ?? 0)}\n\n` +
     `🔌 חיבורים: <b>${conns}/${maxConns}</b> (${Math.round(connPct)}%)\n` +
     `• פנויים: <b>${m.idle_conns ?? 0}</b> · תקועים בטרנזקציה: <b>${m.idle_in_tx ?? 0}</b>\n` +
@@ -426,8 +416,6 @@ async function serverLoadText(): Promise<string> {
     `🎬 מאגר הסרטים: ${fmtBytes(m.movies_bytes ?? 0)} (מתוכו אינדקסים: ${fmtBytes(m.movies_index_bytes ?? 0)})\n` +
     `👤 טבלת משתמשים: ${fmtBytes(m.users_bytes ?? 0)} · 🗒️ לוגים/מטמון: ${fmtBytes(m.logs_bytes ?? 0)}\n` +
     `📝 יומן כתיבה (WAL): ${fmtBytes(m.wal_bytes ?? 0)} · קבצים זמניים: ${fmtBytes(m.temp_bytes ?? 0)} (${m.temp_files ?? 0})\n\n` +
-    `🌐 <b>רוחב פס (משוער החודש)</b>: ${fmtBytes(bandwidth)} מתוך ${fmtBytes(PLAN_BANDWIDTH_BYTES)} (${bwPct.toFixed(1)}%)\n` +
-    `<code>${bar(bwPct)}</code>\n\n` +
     `📊 <b>פעילות היום</b>\n` +
     `• משתמשים חדשים: <b>${m.new_users_today ?? 0}</b> · פעילים: <b>${m.active_users_today ?? 0}</b>\n` +
     `• סרטים חדשים שנוספו: <b>${m.new_movies_today ?? 0}</b>\n` +

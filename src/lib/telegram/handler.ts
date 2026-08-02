@@ -363,7 +363,13 @@ function loadLabel(pct: number) {
 }
 
 async function serverLoadText(): Promise<string> {
-  const m = await serverMetrics().catch(() => ({} as Record<string, number>));
+  const [m, movies] = await Promise.all([
+    serverMetrics().catch(() => ({} as Record<string, number>)),
+    moviesCount().catch(() => 0),
+  ]);
+  if (!Object.keys(m).length) {
+    return `📈 <b>מד עומס שרת</b>\n\n⏳ הנתונים לא נטענו כרגע — נסה לרענן שוב.\n🎬 סרטים במאגר: <b>${movies.toLocaleString()}</b>`;
+  }
   const conns = m.connections ?? 0;
   const maxConns = m.max_connections || 60;
   const connPct = Math.min(100, (conns / maxConns) * 100);
@@ -391,7 +397,7 @@ async function serverLoadText(): Promise<string> {
     `🎬 מאגר הסרטים תופס: ${fmtBytes(m.movies_bytes ?? 0)}\n\n` +
     `🌐 <b>רוחב פס (משוער החודש)</b>: ${fmtBytes(bandwidth)} מתוך ${fmtBytes(PLAN_BANDWIDTH_BYTES)} (${bwPct.toFixed(1)}%)\n` +
     `<code>${bar(bwPct)}</code>\n\n` +
-    `👤 משתמשים: <b>${m.users_count ?? 0}</b> · 👥 קבוצות: <b>${m.groups_count ?? 0}</b> · 🎬 סרטים: <b>${(m.movies_count ?? 0).toLocaleString()}</b>`
+    `👤 משתמשים: <b>${m.users_count ?? 0}</b> · 👥 קבוצות: <b>${m.groups_count ?? 0}</b> · 🎬 סרטים: <b>${movies.toLocaleString()}</b>`
   );
 }
 

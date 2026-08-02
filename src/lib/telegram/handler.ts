@@ -1115,8 +1115,8 @@ async function handleAdminCallback(cq: any, data: string) {
       data.startsWith("admin_req_") ||
       data === "admin_manage" ||
       data === "admin_add" ||
-      data === "admin_quota" ||
-      data.startsWith("admin_q_") ||
+      data === "admin_src_add" ||
+      data.startsWith("admin_src_rm_") ||
       data.startsWith("admin_rm_"))
   ) {
     return;
@@ -1225,7 +1225,7 @@ async function handleAdminCallback(cq: any, data: string) {
         chatId,
         messageId,
         `🎬 <b>ערוצי סרטים</b>\n\n${lines}\n\nלחיצה על ❌ תסיר ערוץ. כל הסרטים שכבר נאספו נשמרים במאגר.`,
-        { reply_markup: sourceChannelsKeyboard(list) },
+        { reply_markup: sourceChannelsKeyboard(list, main) },
       ).catch(() => {});
     }
     case "admin_src_add":
@@ -1313,11 +1313,9 @@ async function handleAdminCallback(cq: any, data: string) {
     return await renderUsersList(chatId, messageId, { query: "", page: 0, sort: "recent", blockedOnly: false });
   }
   if (data === "admin_words") {
-    if (!main) return;
     return await renderBlockedWords(chatId, messageId);
   }
   if (data === "admin_word_add") {
-    if (!main) return;
     await setAdminState(userId, "awaiting_blocked_word");
     return await sendMessage(
       chatId,
@@ -1325,7 +1323,6 @@ async function handleAdminCallback(cq: any, data: string) {
     ).then(() => {}).catch(() => {});
   }
   if (data.startsWith("admin_word_rm:")) {
-    if (!main) return;
     const enc = data.slice("admin_word_rm:".length);
     let word = "";
     try { word = Buffer.from(enc, "base64url").toString("utf8"); } catch { word = ""; }
@@ -1333,7 +1330,6 @@ async function handleAdminCallback(cq: any, data: string) {
     return await renderBlockedWords(chatId, messageId);
   }
   if (data === "admin_load") {
-    if (!main) return;
     return await renderServerLoad(chatId, messageId);
   }
   if (data.startsWith("admin_prem:")) {
@@ -1526,6 +1522,11 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
     st.state === "awaiting_source_channel_add" ||
     st.state === "awaiting_required_channel"
   ) {
+    // Source/required channel configuration is main-admin only.
+    if (!isMainAdmin(userId)) {
+      await setAdminState(userId, null).catch(() => {});
+      return;
+    }
     const target =
       st.state === "awaiting_required_channel" ? "required" : "source";
     const chatRef = text.startsWith("@") || text.startsWith("-") || /^\d+$/.test(text) ? text : `@${text}`;

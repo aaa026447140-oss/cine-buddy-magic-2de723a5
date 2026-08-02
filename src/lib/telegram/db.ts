@@ -129,6 +129,44 @@ export async function logSearch(telegram_id: number, query: string) {
   await admin().from("search_log").insert({ telegram_id, query: query.slice(0, 200) } as any);
 }
 
+// ───── Blocked words (moderation dictionary) ─────
+let _wordsCache: { at: number; words: string[] } | null = null;
+
+export async function listBlockedWords(force = false): Promise<string[]> {
+  if (!force && _wordsCache && Date.now() - _wordsCache.at < 60_000) return _wordsCache.words;
+  const { data } = await admin().from("blocked_words" as any).select("word").order("word", { ascending: true });
+  const words = ((data ?? []) as any[]).map((r) => String(r.word));
+  _wordsCache = { at: Date.now(), words };
+  return words;
+}
+
+export async function addBlockedWord(word: string, added_by: number) {
+  const w = word.trim().toLowerCase();
+  if (!w) return;
+  await admin().from("blocked_words" as any).upsert({ word: w, added_by } as any, { onConflict: "word" });
+  _wordsCache = null;
+}
+
+export async function removeBlockedWord(word: string) {
+  await admin().from("blocked_words" as any).delete().eq("word", word);
+  _wordsCache = null;
+}
+
+/** Reset today's used-search counters for everyone (premium/credits untouched). */
+export async function resetDailyQuotaForAll(): Promise<void> {
+  const day = new Date().toISOString().slice(0, 10);
+  await admin().from("search_usage").update({ used: 0 } as any).eq("day", day);
+}
+
+/** Live server/database load metrics. */
+export async function serverMetrics(): Promise<Record<string, number>> {
+  const { data, error } = await admin().rpc("server_metrics" as any);
+  if (error || !data) return {};
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(data as any)) out[k] = Number(v) || 0;
+  return out;
+}
+
 export async function lastSearches(
   telegram_id: number,
   limit = 15,

@@ -25,6 +25,26 @@ export function isInappropriateQuery(raw: string): boolean {
   return PATTERNS.some((re) => re.test(q));
 }
 
+/**
+ * Matches a query against the admin-managed blocked-word list.
+ * Hebrew words match as substrings; latin words match on word boundaries.
+ */
+export function matchesBlockedWords(raw: string, words: string[]): boolean {
+  const q = (raw || "").toLowerCase().replace(/[\u0591-\u05C7]/g, "");
+  if (!q) return false;
+  for (const w of words) {
+    const word = (w || "").trim().toLowerCase();
+    if (!word) continue;
+    if (/^[a-z0-9 ]+$/.test(word)) {
+      const re = new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i");
+      if (re.test(q)) return true;
+    } else if (q.includes(word)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function formatDuration(minutes: number): string {
   if (minutes < 60) return `${minutes} דקות`;
   const hours = minutes / 60;

@@ -369,7 +369,11 @@ async function serverLoadText(): Promise<string> {
     moviesCount().catch(() => 0),
   ]);
   if (!Object.keys(m).length) {
-    return `📈 <b>מד עומס שרת</b>\n\n⏳ הנתונים לא נטענו כרגע — נסה לרענן שוב.\n🎬 סרטים במאגר: <b>${movies.toLocaleString()}</b>`;
+    const retry = await serverMetrics(true).catch(() => ({} as Record<string, number>));
+    if (!Object.keys(retry).length) {
+      return `📈 <b>מד עומס שרת</b>\n\n⏳ הנתונים לא נטענו כרגע — נסה לרענן שוב.\n🎬 סרטים במאגר: <b>${movies.toLocaleString()}</b>`;
+    }
+    Object.assign(m, retry);
   }
   const conns = m.connections ?? 0;
   const maxConns = m.max_connections || 60;
@@ -441,13 +445,11 @@ async function renderServerLoad(chatId: number, messageId: number) {
       [{ text: "« חזרה", callback_data: "admin_open" }],
     ],
   };
-  // Live view: refresh the same message twice a second for ~10 seconds.
-  for (let i = 0; i < 20; i++) {
-    const text = await serverLoadText();
-    const ok = await editMessageText(chatId, messageId, text, { reply_markup: kb }).then(() => true).catch(() => false);
-    if (!ok && i > 0) break;
-    await new Promise((r) => setTimeout(r, 500));
-  }
+  // Single snapshot + refresh button. A long polling loop here kept the webhook
+  // request open for ~10s, and Telegram serialises updates per chat — that made
+  // every other admin button feel stuck/slow while the meter was running.
+  const text = await serverLoadText();
+  await editMessageText(chatId, messageId, text, { reply_markup: kb }).catch(() => {});
 }
 
 async function requireSubscriptionOrPrompt(

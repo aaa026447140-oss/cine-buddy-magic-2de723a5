@@ -2170,6 +2170,35 @@ async function renderUserView(chatId: number, messageId: number, telegramId: num
   return await renderUserViewImpl(chatId, messageId, telegramId);
 }
 
+/** Pending/approved paid-release requests, with approve & reject buttons. */
+async function renderUnblockRequests(chatId: number, messageId: number) {
+  const reqs = await listUnblockRequests({ limit: 20 }).catch(() => []);
+  const kb: any[][] = [];
+  const lines: string[] = [];
+  for (const r of reqs) {
+    const u = await getBotUser(r.telegram_id).catch(() => null);
+    const name = u ? escapeHtml(displayUserName(u)) : String(r.telegram_id);
+    lines.push(
+      `• <b>${name}</b> · <code>${r.telegram_id}</code> — ${r.permanent ? "לצמיתות" : "זמנית"} · ` +
+        `${r.stars} ⭐ · ${r.status === "approved" ? "אושר, ממתין לתשלום" : "ממתין לאישור"}`,
+    );
+    if (r.status === "pending") {
+      kb.push([
+        { text: `✅ אשר · ${truncateBtn(name, 20)} · ${r.stars}⭐`, callback_data: `admin_unb_ok_${r.id}` },
+        { text: "❌ דחה", callback_data: `admin_unb_no_${r.id}` },
+      ]);
+    }
+  }
+  kb.push([{ text: "🔄 רענן", callback_data: "admin_unbreq" }]);
+  kb.push([{ text: "« חזרה", callback_data: "admin_ul:recent:0:1" }]);
+  await editMessageText(
+    chatId,
+    messageId,
+    `🔓 <b>בקשות שחרור בתשלום</b>\n\n` + (lines.length ? lines.join("\n") : "<i>אין בקשות ממתינות.</i>"),
+    { reply_markup: { inline_keyboard: kb } },
+  ).catch(() => {});
+}
+
 const PREMIUM_PAGE_SIZE = 8;
 
 async function premiumUserRows(users: BotUserRow[]) {

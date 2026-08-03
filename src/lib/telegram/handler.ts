@@ -1326,6 +1326,11 @@ async function handleAdminCallback(cq: any, data: string) {
       data === "admin_manage" ||
       data === "admin_add" ||
       data === "admin_src_add" ||
+      data === "admin_support_group" ||
+      data === "admin_unbreq" ||
+      data.startsWith("admin_unb_") ||
+      data.startsWith("admin_bcok_") ||
+      data.startsWith("admin_bcno_") ||
       data.startsWith("admin_src_rm_") ||
       data.startsWith("admin_rm_"))
   ) {

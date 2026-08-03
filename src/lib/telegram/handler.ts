@@ -751,6 +751,7 @@ async function handleSupportGroupMessage(msg: any) {
     return;
   }
   try {
+    await sendMessage(target, "📩 <b>הודעה מהאדמין</b>").catch(() => {});
     await copyMessage(target, msg.chat.id, msg.message_id);
     await sendMessage(msg.chat.id, "✅ נשלח למשתמש.", { reply_to_message_id: msg.message_id } as any).catch(() => {});
   } catch (e: any) {

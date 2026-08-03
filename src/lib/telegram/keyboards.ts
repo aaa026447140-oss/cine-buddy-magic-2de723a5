@@ -88,9 +88,9 @@ export function resultsKeyboard(
     // In group: button deep-links into private chat for the movie.
     // In private: same callback fetches the movie immediately.
     if (inGroup) {
-      rows.push([{ text: `🎬 ${truncate(movieLabel(r.title, dedupe.query), 55)}`, url: `https://t.me/${botUsername}?start=m_${r.id}` }]);
+      rows.push([{ text: movieButtonText(r.title), url: `https://t.me/${botUsername}?start=m_${r.id}` }]);
     } else {
-      rows.push([{ text: `🎬 ${truncate(movieLabel(r.title, dedupe.query), 55)}`, callback_data: `get_${r.id}` }]);
+      rows.push([{ text: movieButtonText(r.title), callback_data: `get_${r.id}` }]);
     }
   }
   if (totalPages > 1) {
@@ -230,64 +230,15 @@ function truncate(s: string, n: number) {
 }
 
 /**
- * Picks the actual movie name out of a channel caption: skips banner, credit
- * and metadata lines (channel names, links, quality, translation credits) and
- * prefers the line that looks like a title (year / season / episode).
+ * Telegram may visually crop long RTL labels from the wrong side. Keep the
+ * button shorter than the client width and isolate its direction so the
+ * beginning of the attached caption is always the part that remains visible.
  */
-const JUNK_LINE =
-  /(t\.me|https?:\/\/|\[.*\]\(|צפי[יה]ה ישירה|קבוצת הבקשות|שתפו|הצטרפו|הצטרף|ערוץ |לערוץ|מנוי|בילעדי|בלעדי|הועלה|קרדיט|מתורגם על ידי|תרגום|מדובב|איכות|ז'אנר|תקציר|שמע:|מקור קובץ|טריילר|subscribe|join )/i;
-const TITLEISH = /\(?(19|20)\d{2}\)?|עונה\s*\d|פרק\s*\d|s\d{1,2}\s*e\d{1,2}/i;
-/** Channel-banner lines such as "לולו סרטים", "טרמינל סרטים 🎬", "שלום מדיה". */
-const BANNER_LINE =
-  /^[\s\p{Emoji}\p{P}]*([\u0590-\u05FFa-z' ]{2,20})?\s*(סרטים|סדרות|מדיה|טי ?וי|tv|movies|series|channel)\s*[\s\p{Emoji}\p{P}]*$/iu;
-
-/** Removes leading/trailing emoji and punctuation decoration from a line. */
-function stripDecoration(line: string): string {
-  return line
-    .replace(/^[\s\p{Emoji_Presentation}\p{Extended_Pictographic}\p{P}\p{S}]+/u, "")
-    .replace(/[\s\p{Emoji_Presentation}\p{Extended_Pictographic}\p{S}]+$/u, "")
-    .trim();
-}
-
-function normalizeForMatch(s: string) {
-  return s.toLowerCase().replace(/[\u0591-\u05C7]/g, "").replace(/[^\p{L}\p{N} ]+/gu, " ");
-}
-
-/**
- * Picks the best line to show on a result button. Junk/banner lines are
- * skipped, lines containing the user's search words win, then title-looking
- * lines (year / season / episode), then the first informative line.
- */
-export function movieLabel(raw: string, query = ""): string {
-  const lines = (raw || "")
-    .split("\n")
-    .map((l) => stripDecoration(cleanButtonText(l)))
-    .filter((l) => l && l !== "ללא שם" && Array.from(l).length >= 3);
-  if (!lines.length) return raw || "";
-
-  const words = normalizeForMatch(query)
-    .split(/\s+/)
-    .filter((w) => w.length >= 2);
-
-  let best = "";
-  let bestScore = -Infinity;
-  lines.forEach((line, idx) => {
-    const norm = normalizeForMatch(line);
-    let score = 0;
-    if (JUNK_LINE.test(line)) score -= 60;
-    if (BANNER_LINE.test(line)) score -= 80;
-    if (words.length && words.every((w) => norm.includes(w))) score += 120;
-    else if (words.some((w) => norm.includes(w))) score += 60;
-    if (TITLEISH.test(line)) score += 25;
-    const len = Array.from(line).length;
-    score += Math.min(len, 60) / 6;
-    score -= idx; // prefer earlier lines on a tie
-    if (score > bestScore) {
-      bestScore = score;
-      best = line;
-    }
-  });
-  return best || lines[0];
+export function movieButtonText(raw: string): string {
+  const captionStart = cleanButtonText(raw || "ללא שם").replace(/\s+/g, " ").trim();
+  const chars = Array.from(captionStart || "ללא שם");
+  const visible = chars.length > 32 ? `${chars.slice(0, 31).join("")}…` : chars.join("");
+  return `\u2067🎬 ${visible}\u2069`;
 }
 
 function cleanButtonText(value: string) {

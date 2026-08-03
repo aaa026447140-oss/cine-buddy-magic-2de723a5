@@ -814,7 +814,7 @@ async function moderationGate(chatId: number, userId: number, query: string, rep
         [
           inPrivate
             ? { text: label, callback_data: "unblk_req" }
-            : { text: label, url: `https://t.me/${await botUsernameSafe()}?start=unblock` },
+            : { text: label, url: `https://t.me/${(await getMe()).username}?start=unblock` },
         ],
       ],
     };

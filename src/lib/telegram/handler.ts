@@ -1486,6 +1486,15 @@ async function handleAdminCallback(cq: any, data: string) {
           "כדי להסיר את הכפתור — שלח <code>מחק</code>.\n\n" +
           "שלח /cancel לביטול.",
       );
+    case "admin_support_group":
+      await setAdminState(userId, "awaiting_support_group");
+      return await sendMessage(
+        chatId,
+        "📮 שלח את <b>ה-ID</b> או <b>שם המשתמש</b> של קבוצת הפניות (למשל <code>-1001234567890</code> או <code>@mygroup</code>).\n\n" +
+          "הוסף אותי לקבוצה תחילה. כל פנייה של משתמש תגיע לשם, ותשובה נשלחת בתגובה להודעת המשתמש.\n" +
+          "כדי לבטל את הכפתור — שלח <code>מחק</code>.\n\n" +
+          "שלח /cancel לביטול.",
+      );
     case "admin_bc_private":
       await setAdminState(userId, "awaiting_broadcast", { target: "private" });
       return await sendMessage(chatId, "✏️ שלח את ההודעה לשידור <b>לכל המשתמשים בפרטי</b>.\nשלח /cancel לביטול.");

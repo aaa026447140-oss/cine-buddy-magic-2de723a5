@@ -237,8 +237,11 @@ function truncate(s: string, n: number) {
 export function movieButtonText(raw: string): string {
   const captionStart = cleanButtonText(raw || "ללא שם").replace(/\s+/g, " ").trim();
   const chars = Array.from(captionStart || "ללא שם");
-  const visible = chars.length > 32 ? `${chars.slice(0, 31).join("")}…` : chars.join("");
-  return `\u2067🎬 ${visible}\u2069`;
+  // Fit as many leading characters as Telegram allows on one full-width row;
+  // any cropping happens at the END of the caption, never at the start.
+  const MAX = 64;
+  const visible = chars.length > MAX ? `${chars.slice(0, MAX - 1).join("")}…` : chars.join("");
+  return `\u2067${visible}\u2069`;
 }
 
 function cleanButtonText(value: string) {

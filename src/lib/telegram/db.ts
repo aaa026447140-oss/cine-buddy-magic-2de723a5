@@ -82,7 +82,10 @@ export async function markGroupInactive(chat_id: number) {
 }
 
 export async function markUserBlocked(telegram_id: number) {
-  await admin().from("bot_users").update({ is_blocked: true }).eq("telegram_id", telegram_id);
+  await admin()
+    .from("bot_users")
+    .update({ is_blocked: true, blocked_until: null, block_reason: "חסימה ידנית לצמיתות" })
+    .eq("telegram_id", telegram_id);
 }
 
 export async function unmarkUserBlocked(telegram_id: number) {
@@ -125,8 +128,28 @@ export async function releaseIfExpired(u: BotUserRow | null): Promise<boolean> {
   return true;
 }
 
-export async function logSearch(telegram_id: number, query: string) {
-  await admin().from("search_log").insert({ telegram_id, query: query.slice(0, 200) } as any);
+/** Marker prefix stored on search-log rows that triggered a moderation block. */
+export const FLAGGED_PREFIX = "⛔ ";
+
+export async function logSearch(telegram_id: number, query: string, flagged = false) {
+  const q = (flagged ? FLAGGED_PREFIX : "") + query.slice(0, 200);
+  await admin().from("search_log").insert({ telegram_id, query: q } as any);
+}
+
+/**
+ * Releases every temporary block whose time has passed, so the blocked list is
+ * always accurate to the second. Returns how many were released.
+ */
+export async function releaseExpiredBlocks(): Promise<number> {
+  const now = new Date().toISOString();
+  const { data } = await admin()
+    .from("bot_users")
+    .update({ is_blocked: false, blocked_until: null, block_reason: null })
+    .eq("is_blocked", true)
+    .not("blocked_until", "is", null)
+    .lte("blocked_until", now)
+    .select("telegram_id");
+  return (data ?? []).length;
 }
 
 // ───── Blocked words (moderation dictionary) ─────
@@ -1137,7 +1160,12 @@ export async function listUsersPaged(opts: {
   let req: any = admin()
     .from("bot_users")
     .select(USER_COLS, { count: "exact" });
-  if (opts.blockedOnly) req = req.eq("is_blocked", true);
+  if (opts.blockedOnly) {
+    await releaseExpiredBlocks().catch(() => 0);
+    req = req
+      .eq("is_blocked", true)
+      .or(`blocked_until.is.null,blocked_until.gt.${new Date().toISOString()}`);
+  }
   req =
     opts.sort === "joined"
       ? req.order("first_seen", { ascending: true })

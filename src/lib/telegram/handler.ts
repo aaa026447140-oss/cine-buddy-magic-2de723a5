@@ -33,6 +33,7 @@ import {
   applyAutoBlock,
   releaseIfExpired,
   logSearch,
+  FLAGGED_PREFIX,
   lastSearches,
   getMovieById,
   getSettings,
@@ -658,6 +659,7 @@ async function moderationGate(chatId: number, userId: number, query: string, rep
   const words = await listBlockedWords().catch(() => [] as string[]);
   const hit = words.length ? matchesBlockedWords(query, words) : isInappropriateQuery(query);
   if (!hit) return false;
+  logSearch(userId, query, true).catch(() => {});
   const r = await applyAutoBlock(userId, "חיפוש לא הולם").catch(() => null);
   const text = r
     ? "🚫 נחסמת עקב חיפוש לא הולם.\n" +
@@ -1943,16 +1945,36 @@ async function renderPremiumUser(chatId: number, messageId: number, telegramId: 
 
 async function renderSearchHistory(chatId: number, messageId: number, telegramId: number) {
   const u = await getBotUser(telegramId).catch(() => null);
-  const rows = await lastSearches(telegramId, 10).catch(() => []);
+  const rows = await lastSearches(telegramId, 15).catch(() => []);
   const name = u ? escapeHtml(displayUserName(u)) : String(telegramId);
+  const flaggedCount = rows.filter((r) => r.query.startsWith(FLAGGED_PREFIX)).length;
   const body = rows.length
-    ? rows.map((r, i) => `${i + 1}. <code>${escapeHtml(r.query)}</code>\n   ${formatWhen(r.created_at)}`).join("\n")
+    ? rows
+        .map((r, i) => {
+          const flagged = r.query.startsWith(FLAGGED_PREFIX);
+          const q = flagged ? r.query.slice(FLAGGED_PREFIX.length) : r.query;
+          return (
+            `${i + 1}. ${flagged ? "🚫 " : ""}<code>${escapeHtml(q)}</code>` +
+            (flagged ? " <i>(חיפוש לא הולם)</i>" : "") +
+            `\n   ${formatWhen(r.created_at)}`
+          );
+        })
+        .join("\n")
     : "<i>אין חיפושים שמורים.</i>";
   await editMessageText(
     chatId,
     messageId,
-    `📜 <b>10 החיפושים האחרונים</b>\n👤 ${name} · <code>${telegramId}</code>\n\n${body}`,
-    { reply_markup: { inline_keyboard: [[{ text: "« חזרה למשתמש", callback_data: `admin_user_${telegramId}` }]] } },
+    `📜 <b>15 החיפושים האחרונים</b>\n👤 ${name} · <code>${telegramId}</code>` +
+      (flaggedCount ? `\n🚫 חיפושים לא הולמים ברשימה: <b>${flaggedCount}</b>` : "") +
+      `\n\n${body}`,
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🚫 חסום לצמיתות", callback_data: `admin_ublk_${telegramId}` }],
+          [{ text: "« חזרה למשתמש", callback_data: `admin_user_${telegramId}` }],
+        ],
+      },
+    },
   ).catch(() => {});
 }
 
@@ -1985,7 +2007,7 @@ async function renderUserViewImpl(chatId: number, messageId: number, telegramId:
       : "");
   const actionBtn = u.is_blocked
     ? { text: "✅ בטל חסימה", callback_data: `admin_uunblk_${u.telegram_id}` }
-    : { text: "🚫 חסום משתמש", callback_data: `admin_ublk_${u.telegram_id}` };
+    : { text: "🚫 חסום לצמיתות", callback_data: `admin_ublk_${u.telegram_id}` };
   await editMessageText(chatId, messageId, text, {
     reply_markup: {
       inline_keyboard: [

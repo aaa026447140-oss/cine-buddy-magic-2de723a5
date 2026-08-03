@@ -88,9 +88,9 @@ export function resultsKeyboard(
     // In group: button deep-links into private chat for the movie.
     // In private: same callback fetches the movie immediately.
     if (inGroup) {
-      rows.push([{ text: `🎬 ${truncate(r.title, 55)}`, url: `https://t.me/${botUsername}?start=m_${r.id}` }]);
+      rows.push([{ text: `🎬 ${truncate(movieLabel(r.title), 55)}`, url: `https://t.me/${botUsername}?start=m_${r.id}` }]);
     } else {
-      rows.push([{ text: `🎬 ${truncate(r.title, 55)}`, callback_data: `get_${r.id}` }]);
+      rows.push([{ text: `🎬 ${truncate(movieLabel(r.title), 55)}`, callback_data: `get_${r.id}` }]);
     }
   }
   if (totalPages > 1) {
@@ -227,6 +227,26 @@ function truncate(s: string, n: number) {
   s = cleanButtonText(s);
   const chars = Array.from(s);
   return chars.length > n ? chars.slice(0, n - 1).join("") + "…" : s;
+}
+
+/**
+ * Picks the actual movie name out of a channel caption: skips banner, credit
+ * and metadata lines (channel names, links, quality, translation credits) and
+ * prefers the line that looks like a title (year / season / episode).
+ */
+const JUNK_LINE =
+  /(t\.me|https?:\/\/|\[.*\]\(|צפי[יה]ה ישירה|קבוצת הבקשות|שתפו|הצטרפו|הצטרף|ערוץ |לערוץ|מנוי|בילעדי|בלעדי|הועלה|קרדיט|מתורגם על ידי|תרגום|מדובב|איכות|ז'אנר|תקציר|שמע:|מקור קובץ|טריילר|subscribe|join )/i;
+const TITLEISH = /\(?(19|20)\d{2}\)?|עונה\s*\d|פרק\s*\d|s\d{1,2}\s*e\d{1,2}/i;
+
+export function movieLabel(raw: string): string {
+  const lines = (raw || "")
+    .split("\n")
+    .map((l) => cleanButtonText(l))
+    .filter((l) => l && l !== "ללא שם" && Array.from(l).length >= 3);
+  if (!lines.length) return raw || "";
+  const candidates = lines.filter((l) => !JUNK_LINE.test(l));
+  const pool = candidates.length ? candidates : lines;
+  return pool.find((l) => TITLEISH.test(l)) || pool[0];
 }
 
 function cleanButtonText(value: string) {

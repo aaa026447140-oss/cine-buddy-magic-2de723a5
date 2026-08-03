@@ -141,6 +141,8 @@ export type Database = {
           source_channel_title: string | null
           source_channel_username: string | null
           support_chat_url: string | null
+          support_group_id: number | null
+          support_group_title: string | null
           updated_at: string
           updates_channel_url: string | null
         }
@@ -162,6 +164,8 @@ export type Database = {
           source_channel_title?: string | null
           source_channel_username?: string | null
           support_chat_url?: string | null
+          support_group_id?: number | null
+          support_group_title?: string | null
           updated_at?: string
           updates_channel_url?: string | null
         }
@@ -183,6 +187,8 @@ export type Database = {
           source_channel_title?: string | null
           source_channel_username?: string | null
           support_chat_url?: string | null
+          support_group_id?: number | null
+          support_group_title?: string | null
           updated_at?: string
           updates_channel_url?: string | null
         }
@@ -266,6 +272,8 @@ export type Database = {
           last_error: string | null
           locked_at: string | null
           message_id: number
+          notify_chat_id: number | null
+          notify_msg_id: number | null
           phase: string
           resume_after: string
           sent: number
@@ -286,6 +294,8 @@ export type Database = {
           last_error?: string | null
           locked_at?: string | null
           message_id: number
+          notify_chat_id?: number | null
+          notify_msg_id?: number | null
           phase?: string
           resume_after?: string
           sent?: number
@@ -306,6 +316,8 @@ export type Database = {
           last_error?: string | null
           locked_at?: string | null
           message_id?: number
+          notify_chat_id?: number | null
+          notify_msg_id?: number | null
           phase?: string
           resume_after?: string
           sent?: number
@@ -344,6 +356,48 @@ export type Database = {
           sent?: number
           target?: string
           total?: number
+        }
+        Relationships: []
+      }
+      broadcast_requests: {
+        Row: {
+          created_at: string
+          from_chat_id: number
+          id: number
+          message_id: number
+          preview: string | null
+          requester_chat_id: number
+          requester_id: number
+          reviewed_by: number | null
+          status: string
+          target: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          from_chat_id: number
+          id?: number
+          message_id: number
+          preview?: string | null
+          requester_chat_id: number
+          requester_id: number
+          reviewed_by?: number | null
+          status?: string
+          target: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          from_chat_id?: number
+          id?: number
+          message_id?: number
+          preview?: string | null
+          requester_chat_id?: number
+          requester_id?: number
+          reviewed_by?: number | null
+          status?: string
+          target?: string
+          updated_at?: string
         }
         Relationships: []
       }
@@ -521,6 +575,60 @@ export type Database = {
           telegram_payment_charge_id?: string | null
           telegram_provider_charge_id?: string | null
           telegram_user_id?: number
+        }
+        Relationships: []
+      }
+      support_threads: {
+        Row: {
+          created_at: string
+          group_chat_id: number
+          group_message_id: number
+          telegram_id: number
+        }
+        Insert: {
+          created_at?: string
+          group_chat_id: number
+          group_message_id: number
+          telegram_id: number
+        }
+        Update: {
+          created_at?: string
+          group_chat_id?: number
+          group_message_id?: number
+          telegram_id?: number
+        }
+        Relationships: []
+      }
+      unblock_requests: {
+        Row: {
+          created_at: string
+          id: number
+          permanent: boolean
+          reviewed_by: number | null
+          stars: number
+          status: string
+          telegram_id: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: number
+          permanent?: boolean
+          reviewed_by?: number | null
+          stars: number
+          status?: string
+          telegram_id: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: number
+          permanent?: boolean
+          reviewed_by?: number | null
+          stars?: number
+          status?: string
+          telegram_id?: number
+          updated_at?: string
         }
         Relationships: []
       }

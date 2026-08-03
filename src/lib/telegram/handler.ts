@@ -78,6 +78,18 @@ import {
   resetDailyQuotaForAll,
   serverMetrics,
   moviesCount,
+  createBroadcastRequest,
+  getBroadcastRequest,
+  setBroadcastRequestStatus,
+  createUnblockRequest,
+  getUnblockRequest,
+  setUnblockRequestStatus,
+  openUnblockRequestFor,
+  listUnblockRequests,
+  releaseUserAfterPayment,
+  unblockPriceFor,
+  saveSupportThread,
+  getSupportThreadUser,
   type BotSettings,
   type BotUserRow,
 } from "./db";
@@ -494,6 +506,11 @@ async function handleMessage(msg: any) {
 
   // Group: track membership and handle search by text
   if (chat.type === "group" || chat.type === "supergroup") {
+    // Admin contact group: relay main-admin replies back to the user.
+    const gs = await getSettings().catch(() => null);
+    if (gs?.support_group_id && Number(gs.support_group_id) === Number(chat.id)) {
+      return await handleSupportGroupMessage(msg);
+    }
     await upsertGroup({ id: Number(chat.id), title: chat.title, type: chat.type });
     touchGroupMember(Number(chat.id), Number(from.id)).catch(() => {});
     if (msg.text) {
@@ -504,7 +521,7 @@ async function handleMessage(msg: any) {
       // Blocked user in a group: silently ignore search attempts, but notify them.
       const bu = await getBotUser(Number(from.id)).catch(() => null);
       if (bu?.is_blocked && !(await releaseIfExpired(bu).catch(() => false))) {
-        await sendMessage(chat.id, blockedNotice(bu), { reply_to_message_id: msg.message_id } as any).catch(() => {});
+        await sendBlockedNotice(Number(chat.id), bu, msg.message_id);
         return;
       }
       if (await moderationGate(chat.id, Number(from.id), text, msg.message_id)) return;
@@ -557,11 +574,36 @@ async function handleMessage(msg: any) {
       }
       return;
     }
+    if (payload.startsWith("unblock:")) {
+      const reqId = Number(payload.split(":")[1]);
+      await releaseUserAfterPayment(Number(from.id)).catch(() => {});
+      await setUnblockRequestStatus(reqId, "paid").catch(() => {});
+      await sendMessage(chat.id, "🔓 החסימה שלך הוסרה. תודה! שים לב — עבירה נוספת תוביל לחסימה חדשה.");
+      await sendMessage(
+        ADMIN_ID,
+        `💰 המשתמש <code>${from.id}</code> שילם ${sp.total_amount} ⭐ והחסימה שלו הוסרה.`,
+      ).catch(() => {});
+      return;
+    }
     await sendMessage(chat.id, `🙏 תודה רבה על התמיכה! קיבלנו ${sp.total_amount} ⭐`);
     return;
   }
 
   const text: string = msg.text || "";
+
+  // Support ticket composition (available to every user, not only admins).
+  {
+    const st0 = await getAdminState(Number(from.id)).catch(() => null);
+    if (st0?.state === "awaiting_support_msg") {
+      if (text === "/cancel") {
+        await setAdminState(Number(from.id), null).catch(() => {});
+        await sendMessage(chat.id, "❎ בוטל.");
+        return;
+      }
+      await setAdminState(Number(from.id), null).catch(() => {});
+      return await forwardSupportMessage(msg);
+    }
+  }
 
   // Admin multi-step flow
   if (await isAdmin(from.id)) {
@@ -589,7 +631,7 @@ async function handleMessage(msg: any) {
     const bu = await getBotUser(Number(from.id)).catch(() => null);
     if (bu?.is_blocked && text && !text.startsWith("/start") && text !== "/stats" && text !== "/admin") {
       if (!(await releaseIfExpired(bu).catch(() => false))) {
-        await sendMessage(chat.id, blockedNotice(bu)).catch(() => {});
+        await sendBlockedNotice(Number(chat.id), bu);
         return;
       }
     }
@@ -642,12 +684,95 @@ async function handleMessage(msg: any) {
 
 /** Message shown to an already-blocked user, including release time. */
 function blockedNotice(u: { blocked_until?: string | null; block_reason?: string | null }) {
+  return blockedNoticeText(u);
+}
+
+function blockedNoticeText(u: { blocked_until?: string | null; block_reason?: string | null }) {
   if (!u.blocked_until) return "🚫 אתה חסום לצמיתות. פנה למנהל.";
   return (
     "🚫 אתה חסום כרגע.\n" +
     (u.block_reason ? `סיבה: ${u.block_reason}\n` : "") +
     `תשוחרר: ${formatWhen(u.blocked_until)}`
   );
+}
+
+// ───── Admin contact group (support tickets) ─────
+
+/** A user's message to the admin: copied into the contact group with a header. */
+async function forwardSupportMessage(msg: any) {
+  const from = msg.from;
+  const settings = await getSettings();
+  const gid = Number(settings.support_group_id || 0);
+  if (!gid) {
+    await sendMessage(msg.chat.id, "❌ אין כרגע קבוצת פניות מוגדרת. נסה שוב מאוחר יותר.").catch(() => {});
+    return;
+  }
+  const name = escapeHtml(
+    [from.first_name, from.last_name].filter(Boolean).join(" ") || String(from.id),
+  );
+  const header =
+    `✉️ <b>פנייה חדשה</b>\n` +
+    `👤 ${name}${from.username ? ` · @${escapeHtml(from.username)}` : ""}\n` +
+    `🆔 <code>${from.id}</code>\n\n` +
+    `<i>כדי להשיב — הגב על ההודעה הזו או על ההודעה של המשתמש.</i>`;
+  try {
+    const head: any = await sendMessage(gid, header);
+    const copied: any = await copyMessage(gid, msg.chat.id, msg.message_id);
+    if (head?.message_id) await saveSupportThread(gid, Number(head.message_id), Number(from.id)).catch(() => {});
+    if (copied?.message_id) await saveSupportThread(gid, Number(copied.message_id), Number(from.id)).catch(() => {});
+    await sendMessage(msg.chat.id, "✅ הפנייה נשלחה לאדמין. תקבל תשובה כאן בצ׳אט.").catch(() => {});
+  } catch (e: any) {
+    console.error("support forward failed:", e?.message);
+    await sendMessage(msg.chat.id, "❌ לא הצלחתי לשלוח את הפנייה. נסה שוב מאוחר יותר.").catch(() => {});
+  }
+}
+
+/** Main-admin replies inside the contact group are relayed to the user. */
+async function handleSupportGroupMessage(msg: any) {
+  const from = msg.from;
+  if (Number(from?.id) !== ADMIN_ID) return;
+  if (msg.text && msg.text.trim() === "/cancel") return;
+  const replyTo = msg.reply_to_message;
+  if (!replyTo) {
+    await sendMessage(
+      msg.chat.id,
+      "ℹ️ כדי לשלוח הודעה למשתמש — <b>הגב על ההודעה שלו</b> כאן בקבוצה. הודעה שלא נשלחה כתגובה לא נשלחת לאף אחד.",
+      { reply_to_message_id: msg.message_id } as any,
+    ).catch(() => {});
+    return;
+  }
+  const target = await getSupportThreadUser(Number(msg.chat.id), Number(replyTo.message_id)).catch(() => null);
+  if (!target) {
+    await sendMessage(
+      msg.chat.id,
+      "❌ לא זיהיתי משתמש בהודעה שהגבת עליה. הגב על הודעת הפנייה של המשתמש.",
+      { reply_to_message_id: msg.message_id } as any,
+    ).catch(() => {});
+    return;
+  }
+  try {
+    await copyMessage(target, msg.chat.id, msg.message_id);
+    await sendMessage(msg.chat.id, "✅ נשלח למשתמש.", { reply_to_message_id: msg.message_id } as any).catch(() => {});
+  } catch (e: any) {
+    await sendMessage(
+      msg.chat.id,
+      `❌ לא הצלחתי לשלוח למשתמש: ${escapeHtml(e?.description || e?.message || "")}`,
+      { reply_to_message_id: msg.message_id } as any,
+    ).catch(() => {});
+  }
+}
+
+/**
+ * Sends the blocked notice with a "request paid release" button. The request
+ * itself always goes to the main admin for approval before any payment.
+ */
+async function sendBlockedNotice(chatId: number, u: BotUserRow, replyTo?: number) {
+  const price = unblockPriceFor(u);
+  const extra: any = replyTo ? { reply_to_message_id: replyTo } : {};
+  extra.reply_markup = {
+    inline_keyboard: [[{ text: `🔓 בקש שחרור בתשלום · ${price} ⭐`, callback_data: "unblk_req" }]],
+  };
+  await sendMessage(chatId, blockedNotice(u), extra).catch(() => {});
 }
 
 /**
@@ -1026,6 +1151,89 @@ async function handleCallback(cq: any) {
     return;
   }
 
+  if (data === "contact_admin") {
+    await answerCallbackQuery(cq.id);
+    const s = await getSettings();
+    if (!s.support_group_id) {
+      await sendMessage(chatId, "ℹ️ פניות לאדמין אינן פעילות כרגע.").catch(() => {});
+      return;
+    }
+    await setAdminState(Number(from.id), "awaiting_support_msg").catch(() => {});
+    await sendMessage(
+      chatId,
+      "✉️ שלח כאן את ההודעה שלך לאדמין (אפשר גם תמונה או קובץ).\nלביטול שלח /cancel",
+    ).catch(() => {});
+    return;
+  }
+
+  if (data === "unblk_req") {
+    await answerCallbackQuery(cq.id);
+    const u = await getBotUser(Number(from.id)).catch(() => null);
+    if (!u?.is_blocked || (await releaseIfExpired(u).catch(() => false))) {
+      await sendMessage(chatId, "✅ אינך חסום כרגע.").catch(() => {});
+      return;
+    }
+    const open = await openUnblockRequestFor(Number(from.id)).catch(() => null);
+    if (open?.status === "approved") {
+      await sendMessage(chatId, `✅ הבקשה שלך אושרה. לתשלום ושחרור מיידי:`, {
+        reply_markup: { inline_keyboard: [[{ text: `⭐ שלם ${open.stars} כוכבים`, callback_data: `unblk_pay_${open.id}` }]] },
+      }).catch(() => {});
+      return;
+    }
+    if (open?.status === "pending") {
+      await sendMessage(chatId, "⏳ הבקשה שלך כבר ממתינה לאישור האדמין.").catch(() => {});
+      return;
+    }
+    const price = unblockPriceFor(u);
+    const req = await createUnblockRequest({
+      telegram_id: Number(from.id),
+      stars: price,
+      permanent: !u.blocked_until,
+    }).catch(() => null);
+    if (!req) {
+      await sendMessage(chatId, "❌ לא הצלחתי לשלוח את הבקשה. נסה שוב.").catch(() => {});
+      return;
+    }
+    await sendMessage(chatId, "📨 הבקשה נשלחה לאדמין הראשי. תקבל הודעה כשהיא תאושר.").catch(() => {});
+    await sendMessage(
+      ADMIN_ID,
+      `🔓 <b>בקשת שחרור מחסימה</b>\n\n` +
+        `👤 ${escapeHtml(displayUserName(u))}\n🆔 <code>${u.telegram_id}</code>\n` +
+        `סוג חסימה: <b>${u.blocked_until ? formatWhen(u.blocked_until) : "לצמיתות"}</b>\n` +
+        `מחיר שחרור: <b>${price} ⭐</b>`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "✅ אישור", callback_data: `admin_unb_ok_${req.id}` },
+              { text: "❌ דחייה", callback_data: `admin_unb_no_${req.id}` },
+            ],
+          ],
+        },
+      },
+    ).catch(() => {});
+    return;
+  }
+
+  if (data.startsWith("unblk_pay_")) {
+    await answerCallbackQuery(cq.id);
+    const reqId = Number(data.slice("unblk_pay_".length));
+    const req = await getUnblockRequest(reqId).catch(() => null);
+    if (!req || req.telegram_id !== Number(from.id) || req.status !== "approved") {
+      await sendMessage(chatId, "❌ הבקשה אינה זמינה לתשלום.").catch(() => {});
+      return;
+    }
+    await sendInvoice({
+      chat_id: chatId,
+      title: "שחרור מחסימה",
+      description: "תשלום חד־פעמי לשחרור מיידי מהחסימה בבוט.",
+      payload: `unblock:${req.id}:${from.id}`,
+      currency: "XTR",
+      prices: [{ label: `${req.stars} Stars`, amount: req.stars }],
+    }).catch(() => sendMessage(chatId, "❌ לא הצלחתי לפתוח חלון תשלום.").catch(() => {}));
+    return;
+  }
+
   if (data.startsWith("check_")) {
     const payload = data.slice("check_".length);
     const settings = await getSettings();
@@ -1118,6 +1326,11 @@ async function handleAdminCallback(cq: any, data: string) {
       data === "admin_manage" ||
       data === "admin_add" ||
       data === "admin_src_add" ||
+      data === "admin_support_group" ||
+      data === "admin_unbreq" ||
+      data.startsWith("admin_unb_") ||
+      data.startsWith("admin_bcok_") ||
+      data.startsWith("admin_bcno_") ||
       data.startsWith("admin_src_rm_") ||
       data.startsWith("admin_rm_"))
   ) {
@@ -1273,6 +1486,15 @@ async function handleAdminCallback(cq: any, data: string) {
           "כדי להסיר את הכפתור — שלח <code>מחק</code>.\n\n" +
           "שלח /cancel לביטול.",
       );
+    case "admin_support_group":
+      await setAdminState(userId, "awaiting_support_group");
+      return await sendMessage(
+        chatId,
+        "📮 שלח את <b>ה-ID</b> או <b>שם המשתמש</b> של קבוצת הפניות (למשל <code>-1001234567890</code> או <code>@mygroup</code>).\n\n" +
+          "הוסף אותי לקבוצה תחילה. כל פנייה של משתמש תגיע לשם, ותשובה נשלחת בתגובה להודעת המשתמש.\n" +
+          "כדי לבטל את הכפתור — שלח <code>מחק</code>.\n\n" +
+          "שלח /cancel לביטול.",
+      );
     case "admin_bc_private":
       await setAdminState(userId, "awaiting_broadcast", { target: "private" });
       return await sendMessage(chatId, "✏️ שלח את ההודעה לשידור <b>לכל המשתמשים בפרטי</b>.\nשלח /cancel לביטול.");
@@ -1313,6 +1535,80 @@ async function handleAdminCallback(cq: any, data: string) {
   }
   if (data === "admin_users") {
     return await renderUsersList(chatId, messageId, { query: "", page: 0, sort: "recent", blockedOnly: false });
+  }
+
+  // ── Broadcast approval (main admin reviews sub-admin requests) ──
+  if (data.startsWith("admin_bcok_") || data.startsWith("admin_bcno_")) {
+    const approve = data.startsWith("admin_bcok_");
+    const reqId = Number(data.slice("admin_bcok_".length));
+    const req = await getBroadcastRequest(reqId).catch(() => null);
+    if (!req || req.status !== "pending") {
+      return await sendMessage(chatId, "ℹ️ הבקשה כבר טופלה.").then(() => {}).catch(() => {});
+    }
+    await setBroadcastRequestStatus(reqId, approve ? "approved" : "rejected", userId).catch(() => {});
+    await editMessageText(
+      chatId,
+      messageId,
+      `${cq.message.text || ""}\n\n${approve ? "✅ אושר" : "❌ נדחה"}`,
+    ).catch(() => {});
+    if (!approve) {
+      await sendMessage(req.requester_chat_id, "❌ בקשת השידור שלך נדחתה על ידי האדמין הראשי.").catch(() => {});
+      return;
+    }
+    const total = await countBroadcastRecipients(req.target).catch(() => 0);
+    const startText = `🚀 <b>מתחיל שידור...</b>\nיעד: ${req.target}\nסה״כ נמענים: <b>${total.toLocaleString()}</b>`;
+    const status: any = await sendMessage(chatId, startText).catch(() => null);
+    const notify: any = await sendMessage(
+      req.requester_chat_id,
+      `✅ השידור שלך אושר.\n\n${startText}`,
+    ).catch(() => null);
+    try {
+      const job = await createBroadcastJob({
+        admin_user_id: req.requester_id,
+        admin_chat_id: chatId,
+        status_msg_id: status?.message_id ?? null,
+        notify_chat_id: Number(req.requester_chat_id),
+        notify_msg_id: notify?.message_id ?? null,
+        target: req.target,
+        from_chat_id: Number(req.from_chat_id),
+        message_id: Number(req.message_id),
+        total,
+      });
+      await processBroadcastTick(15_000, job.id);
+    } catch (e: any) {
+      await sendMessage(chatId, `❌ שגיאה בשידור: ${escapeHtml(e?.message || String(e))}`).catch(() => {});
+    }
+    return;
+  }
+
+  // ── Paid unblock requests ──
+  if (data === "admin_unbreq") {
+    return await renderUnblockRequests(chatId, messageId);
+  }
+  if (data.startsWith("admin_unb_ok_") || data.startsWith("admin_unb_no_")) {
+    const approve = data.startsWith("admin_unb_ok_");
+    const reqId = Number(data.slice("admin_unb_ok_".length));
+    const req = await getUnblockRequest(reqId).catch(() => null);
+    if (!req || (req.status !== "pending" && req.status !== "approved")) {
+      return await sendMessage(chatId, "ℹ️ הבקשה כבר טופלה.").then(() => {}).catch(() => {});
+    }
+    await setUnblockRequestStatus(reqId, approve ? "approved" : "rejected", userId).catch(() => {});
+    if (approve) {
+      await sendMessage(
+        req.telegram_id,
+        `✅ בקשת השחרור שלך אושרה.\nלשחרור מיידי — שלם <b>${req.stars} ⭐</b>:`,
+        {
+          reply_markup: {
+            inline_keyboard: [[{ text: `⭐ שלם ${req.stars} כוכבים`, callback_data: `unblk_pay_${req.id}` }]],
+          },
+        },
+      ).catch(() => {});
+      await sendMessage(chatId, `✅ אושר. נשלח למשתמש <code>${req.telegram_id}</code> קישור לתשלום ${req.stars} ⭐.`).catch(() => {});
+    } else {
+      await sendMessage(req.telegram_id, "❌ בקשת השחרור שלך נדחתה.").catch(() => {});
+      await sendMessage(chatId, `❌ הבקשה של <code>${req.telegram_id}</code> נדחתה.`).catch(() => {});
+    }
+    return;
   }
   if (data === "admin_words") {
     return await renderBlockedWords(chatId, messageId);
@@ -1659,6 +1955,36 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
     return;
   }
 
+  if (st.state === "awaiting_support_group") {
+    if (!isMainAdmin(userId)) {
+      await setAdminState(userId, null).catch(() => {});
+      return;
+    }
+    await setAdminState(userId, null);
+    if (/^(מחק|remove|clear)$/i.test(text)) {
+      await updateSettings({ support_group_id: null, support_group_title: null } as any);
+      await sendMessage(chatId, "✅ קבוצת הפניות בוטלה. כפתור «פנייה לאדמין» הוסר מהתפריט.");
+      return;
+    }
+    const ref = text.startsWith("@") || text.startsWith("-") || /^\d+$/.test(text) ? text : `@${text}`;
+    try {
+      const ch: any = await getChat(ref);
+      if (!["group", "supergroup"].includes(ch.type)) {
+        await sendMessage(chatId, "❌ זו לא קבוצה. שלח מזהה של קבוצה שאני חבר בה.");
+        return;
+      }
+      await updateSettings({ support_group_id: Number(ch.id), support_group_title: ch.title || null } as any);
+      await sendMessage(
+        chatId,
+        `✅ קבוצת הפניות נקבעה: <b>${escapeHtml(ch.title || String(ch.id))}</b>\n\n` +
+          `מעכשיו כפתור «✉️ פנייה לאדמין» מופיע בתפריט, וכל פנייה תגיע לשם. כדי להשיב — הגב על הודעת המשתמש.`,
+      );
+    } catch (e: any) {
+      await sendMessage(chatId, `❌ לא הצלחתי לאמת את הקבוצה.\n${escapeHtml(e?.description || e?.message || "")}`);
+    }
+    return;
+  }
+
   if (st.state === "awaiting_blocked_word") {
     await setAdminState(userId, null);
     const parts = text.split(/[,\n]/).map((w) => w.trim().toLowerCase()).filter(Boolean);
@@ -1703,6 +2029,43 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
     const target = st.data?.target as "private" | "groups" | "all";
     // Clear the state immediately so the admin is never locked out.
     await setAdminState(userId, null).catch(() => {});
+    // Sub-admins cannot broadcast directly — the main admin approves first.
+    if (!isMainAdmin(userId)) {
+      const preview = (msg.text || msg.caption || "").slice(0, 500);
+      try {
+        const req = await createBroadcastRequest({
+          requester_id: userId,
+          requester_chat_id: chatId,
+          target,
+          from_chat_id: Number(msg.chat.id),
+          message_id: Number(msg.message_id),
+          preview: preview || null,
+        });
+        const who = await getBotUser(userId).catch(() => null);
+        await sendMessage(
+          ADMIN_ID,
+          `📣 <b>בקשת שידור מאדמין</b>\n\n` +
+            `👤 ${escapeHtml(who ? displayUserName(who) : String(userId))} · <code>${userId}</code>\n` +
+            `🎯 יעד: <b>${target}</b>\n\n` +
+            (preview ? `📝 תוכן ההודעה:\n<code>${escapeHtml(preview)}</code>` : "📝 הודעת מדיה — מצורפת מטה."),
+          {
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: "✅ אישור ושידור", callback_data: `admin_bcok_${req.id}` },
+                  { text: "❌ ביטול", callback_data: `admin_bcno_${req.id}` },
+                ],
+              ],
+            },
+          },
+        );
+        await copyMessage(ADMIN_ID, Number(msg.chat.id), Number(msg.message_id)).catch(() => {});
+        await sendMessage(chatId, "📨 הבקשה נשלחה לאדמין הראשי לאישור. תקבל עדכון כאן.");
+      } catch (e: any) {
+        await sendMessage(chatId, `❌ שגיאה בשליחת הבקשה: ${escapeHtml(e?.message || String(e))}`).catch(() => {});
+      }
+      return;
+    }
     const total = await countBroadcastRecipients(target).catch(() => 0);
     const status: any = await sendMessage(
       chatId,
@@ -1864,6 +2227,9 @@ async function renderUsersList(
     if (opts.blockedOnly && total > 0) {
       kb.push([{ text: "♻️ שחרר את כל החסומים", callback_data: "admin_unblock_all" }]);
     }
+    if (opts.blockedOnly) {
+      kb.push([{ text: "🔓 בקשות שחרור בתשלום", callback_data: "admin_unbreq" }]);
+    }
   }
   kb.push([{ text: "🔎 חיפוש", callback_data: "admin_users_search" }]);
   kb.push([{ text: "« חזרה", callback_data: "admin_open" }]);
@@ -1872,6 +2238,35 @@ async function renderUsersList(
 
 async function renderUserView(chatId: number, messageId: number, telegramId: number) {
   return await renderUserViewImpl(chatId, messageId, telegramId);
+}
+
+/** Pending/approved paid-release requests, with approve & reject buttons. */
+async function renderUnblockRequests(chatId: number, messageId: number) {
+  const reqs = await listUnblockRequests({ limit: 20 }).catch(() => []);
+  const kb: any[][] = [];
+  const lines: string[] = [];
+  for (const r of reqs) {
+    const u = await getBotUser(r.telegram_id).catch(() => null);
+    const name = u ? escapeHtml(displayUserName(u)) : String(r.telegram_id);
+    lines.push(
+      `• <b>${name}</b> · <code>${r.telegram_id}</code> — ${r.permanent ? "לצמיתות" : "זמנית"} · ` +
+        `${r.stars} ⭐ · ${r.status === "approved" ? "אושר, ממתין לתשלום" : "ממתין לאישור"}`,
+    );
+    if (r.status === "pending") {
+      kb.push([
+        { text: `✅ אשר · ${truncateBtn(name, 20)} · ${r.stars}⭐`, callback_data: `admin_unb_ok_${r.id}` },
+        { text: "❌ דחה", callback_data: `admin_unb_no_${r.id}` },
+      ]);
+    }
+  }
+  kb.push([{ text: "🔄 רענן", callback_data: "admin_unbreq" }]);
+  kb.push([{ text: "« חזרה", callback_data: "admin_ul:recent:0:1" }]);
+  await editMessageText(
+    chatId,
+    messageId,
+    `🔓 <b>בקשות שחרור בתשלום</b>\n\n` + (lines.length ? lines.join("\n") : "<i>אין בקשות ממתינות.</i>"),
+    { reply_markup: { inline_keyboard: kb } },
+  ).catch(() => {});
 }
 
 const PREMIUM_PAGE_SIZE = 8;

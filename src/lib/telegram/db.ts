@@ -23,6 +23,8 @@ export interface BotSettings {
   builder_username: string | null;
   search_group_url: string | null;
   search_group_title: string | null;
+  support_group_id: number | null;
+  support_group_title: string | null;
   quota_enabled: boolean;
   free_searches_per_day: number;
   price_single_search: number;
@@ -1180,6 +1182,8 @@ export type BroadcastJob = {
   admin_user_id: number;
   admin_chat_id: number;
   status_msg_id: number | null;
+  notify_chat_id: number | null;
+  notify_msg_id: number | null;
   target: "private" | "groups" | "all";
   from_chat_id: number;
   message_id: number;
@@ -1196,6 +1200,8 @@ export async function createBroadcastJob(p: {
   admin_user_id: number;
   admin_chat_id: number;
   status_msg_id: number | null;
+  notify_chat_id?: number | null;
+  notify_msg_id?: number | null;
   target: "private" | "groups" | "all";
   from_chat_id: number;
   message_id: number;
@@ -1279,4 +1285,132 @@ export async function countBroadcastRecipients(target: "private" | "groups" | "a
     total += count ?? 0;
   }
   return total;
+}
+
+// ───── Broadcast approval requests (sub-admins need main-admin approval) ─────
+export type BroadcastRequest = {
+  id: number;
+  requester_id: number;
+  requester_chat_id: number;
+  target: "private" | "groups" | "all";
+  from_chat_id: number;
+  message_id: number;
+  preview: string | null;
+  status: "pending" | "approved" | "rejected";
+};
+
+export async function createBroadcastRequest(p: {
+  requester_id: number;
+  requester_chat_id: number;
+  target: "private" | "groups" | "all";
+  from_chat_id: number;
+  message_id: number;
+  preview: string | null;
+}): Promise<BroadcastRequest> {
+  const { data, error } = await admin().from("broadcast_requests" as any).insert(p as any).select("*").single();
+  if (error) throw error;
+  return data as any;
+}
+
+export async function getBroadcastRequest(id: number): Promise<BroadcastRequest | null> {
+  const { data } = await admin().from("broadcast_requests" as any).select("*").eq("id", id).maybeSingle();
+  return (data as any) ?? null;
+}
+
+export async function setBroadcastRequestStatus(id: number, status: string, reviewed_by: number) {
+  await admin().from("broadcast_requests" as any).update({ status, reviewed_by } as any).eq("id", id);
+}
+
+// ───── Paid unblock requests ─────
+export type UnblockRequest = {
+  id: number;
+  telegram_id: number;
+  stars: number;
+  permanent: boolean;
+  status: "pending" | "approved" | "rejected" | "paid";
+  created_at: string;
+};
+
+/** Star price for releasing a block, by the block length that was applied. */
+export const UNBLOCK_PRICES: Record<number, number> = {
+  5: 1,
+  15: 3,
+  30: 10,
+  1440: 50,
+  2880: 60,
+  10080: 100,
+};
+export const UNBLOCK_PRICE_PERMANENT = 200;
+
+export function unblockPriceFor(u: { blocked_until?: string | null; block_strikes?: number | null }): number {
+  if (!u.blocked_until) return UNBLOCK_PRICE_PERMANENT;
+  const strike = Math.max(1, Number(u.block_strikes || 1));
+  const minutes = BLOCK_LADDER_MIN[Math.min(strike, BLOCK_LADDER_MIN.length) - 1];
+  return UNBLOCK_PRICES[minutes] ?? UNBLOCK_PRICE_PERMANENT;
+}
+
+export async function createUnblockRequest(p: { telegram_id: number; stars: number; permanent: boolean }): Promise<UnblockRequest> {
+  const { data, error } = await admin().from("unblock_requests" as any).insert(p as any).select("*").single();
+  if (error) throw error;
+  return data as any;
+}
+
+export async function getUnblockRequest(id: number): Promise<UnblockRequest | null> {
+  const { data } = await admin().from("unblock_requests" as any).select("*").eq("id", id).maybeSingle();
+  return (data as any) ?? null;
+}
+
+export async function setUnblockRequestStatus(id: number, status: string, reviewed_by?: number) {
+  await admin()
+    .from("unblock_requests" as any)
+    .update({ status, ...(reviewed_by ? { reviewed_by } : {}) } as any)
+    .eq("id", id);
+}
+
+export async function openUnblockRequestFor(telegram_id: number): Promise<UnblockRequest | null> {
+  const { data } = await admin()
+    .from("unblock_requests" as any)
+    .select("*")
+    .eq("telegram_id", telegram_id)
+    .in("status", ["pending", "approved"])
+    .order("id", { ascending: false })
+    .limit(1);
+  return ((data ?? [])[0] as any) ?? null;
+}
+
+export async function listUnblockRequests(opts: { permanentOnly?: boolean; limit?: number } = {}): Promise<UnblockRequest[]> {
+  let req = admin()
+    .from("unblock_requests" as any)
+    .select("*")
+    .in("status", ["pending", "approved"])
+    .order("id", { ascending: false })
+    .limit(opts.limit ?? 20);
+  if (opts.permanentOnly) req = req.eq("permanent", true);
+  const { data } = await req;
+  return ((data ?? []) as any) as UnblockRequest[];
+}
+
+/** Full release after a paid unblock: clears the block and the strike counter. */
+export async function releaseUserAfterPayment(telegram_id: number) {
+  await admin()
+    .from("bot_users")
+    .update({ is_blocked: false, blocked_until: null, block_reason: null, block_strikes: 0 })
+    .eq("telegram_id", telegram_id);
+}
+
+// ───── Support tickets (admin contact group) ─────
+export async function saveSupportThread(group_chat_id: number, group_message_id: number, telegram_id: number) {
+  await admin()
+    .from("support_threads" as any)
+    .upsert({ group_chat_id, group_message_id, telegram_id } as any, { onConflict: "group_chat_id,group_message_id" });
+}
+
+export async function getSupportThreadUser(group_chat_id: number, group_message_id: number): Promise<number | null> {
+  const { data } = await admin()
+    .from("support_threads" as any)
+    .select("telegram_id")
+    .eq("group_chat_id", group_chat_id)
+    .eq("group_message_id", group_message_id)
+    .maybeSingle();
+  return (data as any)?.telegram_id ? Number((data as any).telegram_id) : null;
 }

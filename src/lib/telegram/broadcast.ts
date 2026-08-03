@@ -28,6 +28,15 @@ function renderStatus(job: BroadcastJob, done: boolean, waitSec = 0) {
 
 async function pushStatus(job: BroadcastJob, done: boolean, waitSec = 0) {
   const text = renderStatus(job, done, waitSec);
+  // Mirror the live progress to the requesting sub-admin when the job was
+  // approved by the main admin on their behalf.
+  if (job.notify_chat_id) {
+    if (job.notify_msg_id) {
+      await editMessageText(job.notify_chat_id, job.notify_msg_id, text).catch(() => {});
+    } else if (done) {
+      await sendMessage(job.notify_chat_id, text).catch(() => {});
+    }
+  }
   if (job.status_msg_id) {
     const ok = await editMessageText(job.admin_chat_id, job.status_msg_id, text).catch(() => null);
     if (ok || !done) return;

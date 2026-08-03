@@ -23,6 +23,8 @@ export interface BotSettings {
   builder_username: string | null;
   search_group_url: string | null;
   search_group_title: string | null;
+  support_group_id: number | null;
+  support_group_title: string | null;
   quota_enabled: boolean;
   free_searches_per_day: number;
   price_single_search: number;
@@ -1180,6 +1182,8 @@ export type BroadcastJob = {
   admin_user_id: number;
   admin_chat_id: number;
   status_msg_id: number | null;
+  notify_chat_id: number | null;
+  notify_msg_id: number | null;
   target: "private" | "groups" | "all";
   from_chat_id: number;
   message_id: number;
@@ -1196,6 +1200,8 @@ export async function createBroadcastJob(p: {
   admin_user_id: number;
   admin_chat_id: number;
   status_msg_id: number | null;
+  notify_chat_id?: number | null;
+  notify_msg_id?: number | null;
   target: "private" | "groups" | "all";
   from_chat_id: number;
   message_id: number;

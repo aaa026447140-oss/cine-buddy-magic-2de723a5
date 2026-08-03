@@ -1536,6 +1536,80 @@ async function handleAdminCallback(cq: any, data: string) {
   if (data === "admin_users") {
     return await renderUsersList(chatId, messageId, { query: "", page: 0, sort: "recent", blockedOnly: false });
   }
+
+  // ── Broadcast approval (main admin reviews sub-admin requests) ──
+  if (data.startsWith("admin_bcok_") || data.startsWith("admin_bcno_")) {
+    const approve = data.startsWith("admin_bcok_");
+    const reqId = Number(data.slice("admin_bcok_".length));
+    const req = await getBroadcastRequest(reqId).catch(() => null);
+    if (!req || req.status !== "pending") {
+      return await sendMessage(chatId, "ℹ️ הבקשה כבר טופלה.").then(() => {}).catch(() => {});
+    }
+    await setBroadcastRequestStatus(reqId, approve ? "approved" : "rejected", userId).catch(() => {});
+    await editMessageText(
+      chatId,
+      messageId,
+      `${cq.message.text || ""}\n\n${approve ? "✅ אושר" : "❌ נדחה"}`,
+    ).catch(() => {});
+    if (!approve) {
+      await sendMessage(req.requester_chat_id, "❌ בקשת השידור שלך נדחתה על ידי האדמין הראשי.").catch(() => {});
+      return;
+    }
+    const total = await countBroadcastRecipients(req.target).catch(() => 0);
+    const startText = `🚀 <b>מתחיל שידור...</b>\nיעד: ${req.target}\nסה״כ נמענים: <b>${total.toLocaleString()}</b>`;
+    const status: any = await sendMessage(chatId, startText).catch(() => null);
+    const notify: any = await sendMessage(
+      req.requester_chat_id,
+      `✅ השידור שלך אושר.\n\n${startText}`,
+    ).catch(() => null);
+    try {
+      const job = await createBroadcastJob({
+        admin_user_id: req.requester_id,
+        admin_chat_id: chatId,
+        status_msg_id: status?.message_id ?? null,
+        notify_chat_id: Number(req.requester_chat_id),
+        notify_msg_id: notify?.message_id ?? null,
+        target: req.target,
+        from_chat_id: Number(req.from_chat_id),
+        message_id: Number(req.message_id),
+        total,
+      });
+      await processBroadcastTick(15_000, job.id);
+    } catch (e: any) {
+      await sendMessage(chatId, `❌ שגיאה בשידור: ${escapeHtml(e?.message || String(e))}`).catch(() => {});
+    }
+    return;
+  }
+
+  // ── Paid unblock requests ──
+  if (data === "admin_unbreq") {
+    return await renderUnblockRequests(chatId, messageId);
+  }
+  if (data.startsWith("admin_unb_ok_") || data.startsWith("admin_unb_no_")) {
+    const approve = data.startsWith("admin_unb_ok_");
+    const reqId = Number(data.slice("admin_unb_ok_".length));
+    const req = await getUnblockRequest(reqId).catch(() => null);
+    if (!req || (req.status !== "pending" && req.status !== "approved")) {
+      return await sendMessage(chatId, "ℹ️ הבקשה כבר טופלה.").then(() => {}).catch(() => {});
+    }
+    await setUnblockRequestStatus(reqId, approve ? "approved" : "rejected", userId).catch(() => {});
+    if (approve) {
+      await sendMessage(
+        req.telegram_id,
+        `✅ בקשת השחרור שלך אושרה.\nלשחרור מיידי — שלם <b>${req.stars} ⭐</b>:`,
+        {
+          reply_markup: {
+            inline_keyboard: [[{ text: `⭐ שלם ${req.stars} כוכבים`, callback_data: `unblk_pay_${req.id}` }]],
+          },
+        },
+      ).catch(() => {});
+      await sendMessage(chatId, `✅ אושר. נשלח למשתמש <code>${req.telegram_id}</code> קישור לתשלום ${req.stars} ⭐.`).catch(() => {});
+    } else {
+      await sendMessage(req.telegram_id, "❌ בקשת השחרור שלך נדחתה.").catch(() => {});
+      await sendMessage(chatId, `❌ הבקשה של <code>${req.telegram_id}</code> נדחתה.`).catch(() => {});
+    }
+    return;
+  }
   if (data === "admin_words") {
     return await renderBlockedWords(chatId, messageId);
   }

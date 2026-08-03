@@ -27,6 +27,9 @@ export function startMenuKeyboard(s: BotSettings, botUsername: string) {
     { text: "➕ הוספה לקבוצה", url: `https://t.me/${botUsername}?startgroup=true&admin=${addRights}` },
   ]);
   rows.push([{ text: "📢 פרסום ממומן", callback_data: "ads_menu" }]);
+  if (s.support_group_id) {
+    rows.push([{ text: "✉️ פנייה לאדמין", callback_data: "contact_admin" }]);
+  }
   return { inline_keyboard: rows };
 }
 
@@ -159,6 +162,9 @@ export function adminPanelKeyboard(isMain: boolean) {
     rows.push([{ text: "🔒 ניהול ערוצי חובה", callback_data: "admin_required" }]);
   }
   rows.push([{ text: "🔎 הגדרת קבוצת חיפוש", callback_data: "admin_set_search_group" }]);
+  if (isMain) {
+    rows.push([{ text: "📮 הגדרת קבוצת פניות", callback_data: "admin_support_group" }]);
+  }
   rows.push([{ text: "🎟️ ניהול חיפושים ומחירים", callback_data: "admin_quota" }]);
   rows.push([{ text: "📊 סטטיסטיקות", callback_data: "admin_stats" }]);
   rows.push([

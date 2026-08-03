@@ -78,6 +78,18 @@ import {
   resetDailyQuotaForAll,
   serverMetrics,
   moviesCount,
+  createBroadcastRequest,
+  getBroadcastRequest,
+  setBroadcastRequestStatus,
+  createUnblockRequest,
+  getUnblockRequest,
+  setUnblockRequestStatus,
+  openUnblockRequestFor,
+  listUnblockRequests,
+  releaseUserAfterPayment,
+  unblockPriceFor,
+  saveSupportThread,
+  getSupportThreadUser,
   type BotSettings,
   type BotUserRow,
 } from "./db";
@@ -648,6 +660,19 @@ function blockedNotice(u: { blocked_until?: string | null; block_reason?: string
     (u.block_reason ? `סיבה: ${u.block_reason}\n` : "") +
     `תשוחרר: ${formatWhen(u.blocked_until)}`
   );
+}
+
+/**
+ * Sends the blocked notice with a "request paid release" button. The request
+ * itself always goes to the main admin for approval before any payment.
+ */
+async function sendBlockedNotice(chatId: number, u: BotUserRow, replyTo?: number) {
+  const price = unblockPriceFor(u);
+  const extra: any = replyTo ? { reply_to_message_id: replyTo } : {};
+  extra.reply_markup = {
+    inline_keyboard: [[{ text: `🔓 בקש שחרור בתשלום · ${price} ⭐`, callback_data: "unblk_req" }]],
+  };
+  await sendMessage(chatId, blockedNotice(u), extra).catch(() => {});
 }
 
 /**

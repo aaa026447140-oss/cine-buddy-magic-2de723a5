@@ -1151,6 +1151,89 @@ async function handleCallback(cq: any) {
     return;
   }
 
+  if (data === "contact_admin") {
+    await answerCallbackQuery(cq.id);
+    const s = await getSettings();
+    if (!s.support_group_id) {
+      await sendMessage(chatId, "ℹ️ פניות לאדמין אינן פעילות כרגע.").catch(() => {});
+      return;
+    }
+    await setAdminState(Number(from.id), "awaiting_support_msg").catch(() => {});
+    await sendMessage(
+      chatId,
+      "✉️ שלח כאן את ההודעה שלך לאדמין (אפשר גם תמונה או קובץ).\nלביטול שלח /cancel",
+    ).catch(() => {});
+    return;
+  }
+
+  if (data === "unblk_req") {
+    await answerCallbackQuery(cq.id);
+    const u = await getBotUser(Number(from.id)).catch(() => null);
+    if (!u?.is_blocked || (await releaseIfExpired(u).catch(() => false))) {
+      await sendMessage(chatId, "✅ אינך חסום כרגע.").catch(() => {});
+      return;
+    }
+    const open = await openUnblockRequestFor(Number(from.id)).catch(() => null);
+    if (open?.status === "approved") {
+      await sendMessage(chatId, `✅ הבקשה שלך אושרה. לתשלום ושחרור מיידי:`, {
+        reply_markup: { inline_keyboard: [[{ text: `⭐ שלם ${open.stars} כוכבים`, callback_data: `unblk_pay_${open.id}` }]] },
+      }).catch(() => {});
+      return;
+    }
+    if (open?.status === "pending") {
+      await sendMessage(chatId, "⏳ הבקשה שלך כבר ממתינה לאישור האדמין.").catch(() => {});
+      return;
+    }
+    const price = unblockPriceFor(u);
+    const req = await createUnblockRequest({
+      telegram_id: Number(from.id),
+      stars: price,
+      permanent: !u.blocked_until,
+    }).catch(() => null);
+    if (!req) {
+      await sendMessage(chatId, "❌ לא הצלחתי לשלוח את הבקשה. נסה שוב.").catch(() => {});
+      return;
+    }
+    await sendMessage(chatId, "📨 הבקשה נשלחה לאדמין הראשי. תקבל הודעה כשהיא תאושר.").catch(() => {});
+    await sendMessage(
+      ADMIN_ID,
+      `🔓 <b>בקשת שחרור מחסימה</b>\n\n` +
+        `👤 ${escapeHtml(displayUserName(u))}\n🆔 <code>${u.telegram_id}</code>\n` +
+        `סוג חסימה: <b>${u.blocked_until ? formatWhen(u.blocked_until) : "לצמיתות"}</b>\n` +
+        `מחיר שחרור: <b>${price} ⭐</b>`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "✅ אישור", callback_data: `admin_unb_ok_${req.id}` },
+              { text: "❌ דחייה", callback_data: `admin_unb_no_${req.id}` },
+            ],
+          ],
+        },
+      },
+    ).catch(() => {});
+    return;
+  }
+
+  if (data.startsWith("unblk_pay_")) {
+    await answerCallbackQuery(cq.id);
+    const reqId = Number(data.slice("unblk_pay_".length));
+    const req = await getUnblockRequest(reqId).catch(() => null);
+    if (!req || req.telegram_id !== Number(from.id) || req.status !== "approved") {
+      await sendMessage(chatId, "❌ הבקשה אינה זמינה לתשלום.").catch(() => {});
+      return;
+    }
+    await sendInvoice({
+      chat_id: chatId,
+      title: "שחרור מחסימה",
+      description: "תשלום חד־פעמי לשחרור מיידי מהחסימה בבוט.",
+      payload: `unblock:${req.id}:${from.id}`,
+      currency: "XTR",
+      prices: [{ label: `${req.stars} Stars`, amount: req.stars }],
+    }).catch(() => sendMessage(chatId, "❌ לא הצלחתי לפתוח חלון תשלום.").catch(() => {}));
+    return;
+  }
+
   if (data.startsWith("check_")) {
     const payload = data.slice("check_".length);
     const settings = await getSettings();

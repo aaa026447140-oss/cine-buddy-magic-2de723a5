@@ -751,6 +751,7 @@ async function handleSupportGroupMessage(msg: any) {
     return;
   }
   try {
+    await sendMessage(target, "📩 <b>הודעה מהאדמין</b>").catch(() => {});
     await copyMessage(target, msg.chat.id, msg.message_id);
     await sendMessage(msg.chat.id, "✅ נשלח למשתמש.", { reply_to_message_id: msg.message_id } as any).catch(() => {});
   } catch (e: any) {
@@ -768,9 +769,19 @@ async function handleSupportGroupMessage(msg: any) {
  */
 async function sendBlockedNotice(chatId: number, u: BotUserRow, replyTo?: number) {
   const price = unblockPriceFor(u);
+  const permanent = !u.blocked_until;
   const extra: any = replyTo ? { reply_to_message_id: replyTo } : {};
   extra.reply_markup = {
-    inline_keyboard: [[{ text: `🔓 בקש שחרור בתשלום · ${price} ⭐`, callback_data: "unblk_req" }]],
+    inline_keyboard: [
+      [
+        {
+          text: permanent
+            ? `🔓 בקש שחרור בתשלום · ${price} ⭐`
+            : `🔓 שחרור מיידי בתשלום · ${price} ⭐`,
+          callback_data: "unblk_req",
+        },
+      ],
+    ],
   };
   await sendMessage(chatId, blockedNotice(u), extra).catch(() => {});
 }
@@ -792,7 +803,24 @@ async function moderationGate(chatId: number, userId: number, query: string, rep
         ? `משך החסימה: ${formatDuration(r.minutes)}\nתשוחרר: ${formatWhen(r.until!)}`
         : "החסימה היא לצמיתות.")
     : "🚫 נחסמת עקב חיפוש לא הולם.";
-  await sendMessage(chatId, text, replyTo ? ({ reply_to_message_id: replyTo } as any) : undefined).catch(() => {});
+  const extra: any = replyTo ? { reply_to_message_id: replyTo } : {};
+  if (r) {
+    const price = unblockPriceFor({ blocked_until: r.until, block_strikes: r.strike });
+    const inPrivate = Number(chatId) === Number(userId);
+    const label = r.minutes
+      ? `🔓 שחרור מיידי בתשלום · ${price} ⭐`
+      : `🔓 בקש שחרור בתשלום · ${price} ⭐`;
+    extra.reply_markup = {
+      inline_keyboard: [
+        [
+          inPrivate
+            ? { text: label, callback_data: "unblk_req" }
+            : { text: label, url: `https://t.me/${(await getMe()).username}?start=unblock` },
+        ],
+      ],
+    };
+  }
+  await sendMessage(chatId, text, extra).catch(() => {});
   return true;
 }
 
@@ -1185,6 +1213,29 @@ async function handleCallback(cq: any) {
       return;
     }
     const price = unblockPriceFor(u);
+    const isPermanent = !u.blocked_until;
+    if (!isPermanent) {
+      // Temporary blocks: the user pays directly, no admin approval needed.
+      const reqTmp = await createUnblockRequest({
+        telegram_id: Number(from.id),
+        stars: price,
+        permanent: false,
+      }).catch(() => null);
+      if (!reqTmp) {
+        await sendMessage(chatId, "❌ לא הצלחתי לפתוח חלון תשלום. נסה שוב.").catch(() => {});
+        return;
+      }
+      await setUnblockRequestStatus(reqTmp.id, "approved").catch(() => {});
+      await sendInvoice({
+        chat_id: chatId,
+        title: "שחרור מחסימה",
+        description: "תשלום חד־פעמי לשחרור מיידי מהחסימה בבוט.",
+        payload: `unblock:${reqTmp.id}:${from.id}`,
+        currency: "XTR",
+        prices: [{ label: `${price} Stars`, amount: price }],
+      }).catch(() => sendMessage(chatId, "❌ לא הצלחתי לפתוח חלון תשלום.").catch(() => {}));
+      return;
+    }
     const req = await createUnblockRequest({
       telegram_id: Number(from.id),
       stars: price,
@@ -1593,6 +1644,10 @@ async function handleAdminCallback(cq: any, data: string) {
       return await sendMessage(chatId, "ℹ️ הבקשה כבר טופלה.").then(() => {}).catch(() => {});
     }
     await setUnblockRequestStatus(reqId, approve ? "approved" : "rejected", userId).catch(() => {});
+    // Remove the decision message so the admin can't approve twice.
+    if (messageId) {
+      await tg("deleteMessage", { chat_id: chatId, message_id: messageId }).catch(() => {});
+    }
     if (approve) {
       await sendMessage(
         req.telegram_id,

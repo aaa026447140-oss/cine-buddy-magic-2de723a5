@@ -1955,10 +1955,6 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
     return;
   }
 
-  if (st.state === "awaiting_blocked_word") {
-    // handled below
-  }
-
   if (st.state === "awaiting_support_group") {
     if (!isMainAdmin(userId)) {
       await setAdminState(userId, null).catch(() => {});
@@ -2230,6 +2226,9 @@ async function renderUsersList(
     ]);
     if (opts.blockedOnly && total > 0) {
       kb.push([{ text: "♻️ שחרר את כל החסומים", callback_data: "admin_unblock_all" }]);
+    }
+    if (opts.blockedOnly) {
+      kb.push([{ text: "🔓 בקשות שחרור בתשלום", callback_data: "admin_unbreq" }]);
     }
   }
   kb.push([{ text: "🔎 חיפוש", callback_data: "admin_users_search" }]);

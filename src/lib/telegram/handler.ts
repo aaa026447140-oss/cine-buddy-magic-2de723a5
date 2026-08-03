@@ -768,9 +768,19 @@ async function handleSupportGroupMessage(msg: any) {
  */
 async function sendBlockedNotice(chatId: number, u: BotUserRow, replyTo?: number) {
   const price = unblockPriceFor(u);
+  const permanent = !u.blocked_until;
   const extra: any = replyTo ? { reply_to_message_id: replyTo } : {};
   extra.reply_markup = {
-    inline_keyboard: [[{ text: `🔓 בקש שחרור בתשלום · ${price} ⭐`, callback_data: "unblk_req" }]],
+    inline_keyboard: [
+      [
+        {
+          text: permanent
+            ? `🔓 בקש שחרור בתשלום · ${price} ⭐`
+            : `🔓 שחרור מיידי בתשלום · ${price} ⭐`,
+          callback_data: "unblk_req",
+        },
+      ],
+    ],
   };
   await sendMessage(chatId, blockedNotice(u), extra).catch(() => {});
 }
@@ -792,7 +802,24 @@ async function moderationGate(chatId: number, userId: number, query: string, rep
         ? `משך החסימה: ${formatDuration(r.minutes)}\nתשוחרר: ${formatWhen(r.until!)}`
         : "החסימה היא לצמיתות.")
     : "🚫 נחסמת עקב חיפוש לא הולם.";
-  await sendMessage(chatId, text, replyTo ? ({ reply_to_message_id: replyTo } as any) : undefined).catch(() => {});
+  const extra: any = replyTo ? { reply_to_message_id: replyTo } : {};
+  if (r) {
+    const price = unblockPriceFor({ blocked_until: r.until, block_strikes: r.strike });
+    const inPrivate = Number(chatId) === Number(userId);
+    const label = r.minutes
+      ? `🔓 שחרור מיידי בתשלום · ${price} ⭐`
+      : `🔓 בקש שחרור בתשלום · ${price} ⭐`;
+    extra.reply_markup = {
+      inline_keyboard: [
+        [
+          inPrivate
+            ? { text: label, callback_data: "unblk_req" }
+            : { text: label, url: `https://t.me/${await botUsernameSafe()}?start=unblock` },
+        ],
+      ],
+    };
+  }
+  await sendMessage(chatId, text, extra).catch(() => {});
   return true;
 }
 

@@ -1956,6 +1956,40 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
   }
 
   if (st.state === "awaiting_blocked_word") {
+    // handled below
+  }
+
+  if (st.state === "awaiting_support_group") {
+    if (!isMainAdmin(userId)) {
+      await setAdminState(userId, null).catch(() => {});
+      return;
+    }
+    await setAdminState(userId, null);
+    if (/^(מחק|remove|clear)$/i.test(text)) {
+      await updateSettings({ support_group_id: null, support_group_title: null } as any);
+      await sendMessage(chatId, "✅ קבוצת הפניות בוטלה. כפתור «פנייה לאדמין» הוסר מהתפריט.");
+      return;
+    }
+    const ref = text.startsWith("@") || text.startsWith("-") || /^\d+$/.test(text) ? text : `@${text}`;
+    try {
+      const ch: any = await getChat(ref);
+      if (!["group", "supergroup"].includes(ch.type)) {
+        await sendMessage(chatId, "❌ זו לא קבוצה. שלח מזהה של קבוצה שאני חבר בה.");
+        return;
+      }
+      await updateSettings({ support_group_id: Number(ch.id), support_group_title: ch.title || null } as any);
+      await sendMessage(
+        chatId,
+        `✅ קבוצת הפניות נקבעה: <b>${escapeHtml(ch.title || String(ch.id))}</b>\n\n` +
+          `מעכשיו כפתור «✉️ פנייה לאדמין» מופיע בתפריט, וכל פנייה תגיע לשם. כדי להשיב — הגב על הודעת המשתמש.`,
+      );
+    } catch (e: any) {
+      await sendMessage(chatId, `❌ לא הצלחתי לאמת את הקבוצה.\n${escapeHtml(e?.description || e?.message || "")}`);
+    }
+    return;
+  }
+
+  if (st.state === "awaiting_blocked_word") {
     await setAdminState(userId, null);
     const parts = text.split(/[,\n]/).map((w) => w.trim().toLowerCase()).filter(Boolean);
     for (const w of parts) await addBlockedWord(w, userId).catch(() => {});
@@ -1999,6 +2033,43 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
     const target = st.data?.target as "private" | "groups" | "all";
     // Clear the state immediately so the admin is never locked out.
     await setAdminState(userId, null).catch(() => {});
+    // Sub-admins cannot broadcast directly — the main admin approves first.
+    if (!isMainAdmin(userId)) {
+      const preview = (msg.text || msg.caption || "").slice(0, 500);
+      try {
+        const req = await createBroadcastRequest({
+          requester_id: userId,
+          requester_chat_id: chatId,
+          target,
+          from_chat_id: Number(msg.chat.id),
+          message_id: Number(msg.message_id),
+          preview: preview || null,
+        });
+        const who = await getBotUser(userId).catch(() => null);
+        await sendMessage(
+          ADMIN_ID,
+          `📣 <b>בקשת שידור מאדמין</b>\n\n` +
+            `👤 ${escapeHtml(who ? displayUserName(who) : String(userId))} · <code>${userId}</code>\n` +
+            `🎯 יעד: <b>${target}</b>\n\n` +
+            (preview ? `📝 תוכן ההודעה:\n<code>${escapeHtml(preview)}</code>` : "📝 הודעת מדיה — מצורפת מטה."),
+          {
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: "✅ אישור ושידור", callback_data: `admin_bcok_${req.id}` },
+                  { text: "❌ ביטול", callback_data: `admin_bcno_${req.id}` },
+                ],
+              ],
+            },
+          },
+        );
+        await copyMessage(ADMIN_ID, Number(msg.chat.id), Number(msg.message_id)).catch(() => {});
+        await sendMessage(chatId, "📨 הבקשה נשלחה לאדמין הראשי לאישור. תקבל עדכון כאן.");
+      } catch (e: any) {
+        await sendMessage(chatId, `❌ שגיאה בשליחת הבקשה: ${escapeHtml(e?.message || String(e))}`).catch(() => {});
+      }
+      return;
+    }
     const total = await countBroadcastRecipients(target).catch(() => 0);
     const status: any = await sendMessage(
       chatId,

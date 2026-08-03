@@ -88,9 +88,9 @@ export function resultsKeyboard(
     // In group: button deep-links into private chat for the movie.
     // In private: same callback fetches the movie immediately.
     if (inGroup) {
-      rows.push([{ text: `🎬 ${truncate(movieLabel(r.title), 55)}`, url: `https://t.me/${botUsername}?start=m_${r.id}` }]);
+      rows.push([{ text: `🎬 ${truncate(movieLabel(r.title, dedupe.query), 55)}`, url: `https://t.me/${botUsername}?start=m_${r.id}` }]);
     } else {
-      rows.push([{ text: `🎬 ${truncate(movieLabel(r.title), 55)}`, callback_data: `get_${r.id}` }]);
+      rows.push([{ text: `🎬 ${truncate(movieLabel(r.title, dedupe.query), 55)}`, callback_data: `get_${r.id}` }]);
     }
   }
   if (totalPages > 1) {

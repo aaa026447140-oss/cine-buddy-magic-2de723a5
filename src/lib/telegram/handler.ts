@@ -33,6 +33,7 @@ import {
   applyAutoBlock,
   releaseIfExpired,
   logSearch,
+  FLAGGED_PREFIX,
   lastSearches,
   getMovieById,
   getSettings,

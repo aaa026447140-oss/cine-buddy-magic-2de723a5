@@ -506,6 +506,11 @@ async function handleMessage(msg: any) {
 
   // Group: track membership and handle search by text
   if (chat.type === "group" || chat.type === "supergroup") {
+    // Admin contact group: relay main-admin replies back to the user.
+    const gs = await getSettings().catch(() => null);
+    if (gs?.support_group_id && Number(gs.support_group_id) === Number(chat.id)) {
+      return await handleSupportGroupMessage(msg);
+    }
     await upsertGroup({ id: Number(chat.id), title: chat.title, type: chat.type });
     touchGroupMember(Number(chat.id), Number(from.id)).catch(() => {});
     if (msg.text) {
@@ -516,7 +521,7 @@ async function handleMessage(msg: any) {
       // Blocked user in a group: silently ignore search attempts, but notify them.
       const bu = await getBotUser(Number(from.id)).catch(() => null);
       if (bu?.is_blocked && !(await releaseIfExpired(bu).catch(() => false))) {
-        await sendMessage(chat.id, blockedNotice(bu), { reply_to_message_id: msg.message_id } as any).catch(() => {});
+        await sendBlockedNotice(Number(chat.id), bu, msg.message_id);
         return;
       }
       if (await moderationGate(chat.id, Number(from.id), text, msg.message_id)) return;
@@ -569,11 +574,36 @@ async function handleMessage(msg: any) {
       }
       return;
     }
+    if (payload.startsWith("unblock:")) {
+      const reqId = Number(payload.split(":")[1]);
+      await releaseUserAfterPayment(Number(from.id)).catch(() => {});
+      await setUnblockRequestStatus(reqId, "paid").catch(() => {});
+      await sendMessage(chat.id, "🔓 החסימה שלך הוסרה. תודה! שים לב — עבירה נוספת תוביל לחסימה חדשה.");
+      await sendMessage(
+        ADMIN_ID,
+        `💰 המשתמש <code>${from.id}</code> שילם ${sp.total_amount} ⭐ והחסימה שלו הוסרה.`,
+      ).catch(() => {});
+      return;
+    }
     await sendMessage(chat.id, `🙏 תודה רבה על התמיכה! קיבלנו ${sp.total_amount} ⭐`);
     return;
   }
 
   const text: string = msg.text || "";
+
+  // Support ticket composition (available to every user, not only admins).
+  {
+    const st0 = await getAdminState(Number(from.id)).catch(() => null);
+    if (st0?.state === "awaiting_support_msg") {
+      if (text === "/cancel") {
+        await setAdminState(Number(from.id), null).catch(() => {});
+        await sendMessage(chat.id, "❎ בוטל.");
+        return;
+      }
+      await setAdminState(Number(from.id), null).catch(() => {});
+      return await forwardSupportMessage(msg);
+    }
+  }
 
   // Admin multi-step flow
   if (await isAdmin(from.id)) {
@@ -601,7 +631,7 @@ async function handleMessage(msg: any) {
     const bu = await getBotUser(Number(from.id)).catch(() => null);
     if (bu?.is_blocked && text && !text.startsWith("/start") && text !== "/stats" && text !== "/admin") {
       if (!(await releaseIfExpired(bu).catch(() => false))) {
-        await sendMessage(chat.id, blockedNotice(bu)).catch(() => {});
+        await sendBlockedNotice(Number(chat.id), bu);
         return;
       }
     }

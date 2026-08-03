@@ -1212,6 +1212,29 @@ async function handleCallback(cq: any) {
       return;
     }
     const price = unblockPriceFor(u);
+    const isPermanent = !u.blocked_until;
+    if (!isPermanent) {
+      // Temporary blocks: the user pays directly, no admin approval needed.
+      const reqTmp = await createUnblockRequest({
+        telegram_id: Number(from.id),
+        stars: price,
+        permanent: false,
+      }).catch(() => null);
+      if (!reqTmp) {
+        await sendMessage(chatId, "❌ לא הצלחתי לפתוח חלון תשלום. נסה שוב.").catch(() => {});
+        return;
+      }
+      await setUnblockRequestStatus(reqTmp.id, "approved").catch(() => {});
+      await sendInvoice({
+        chat_id: chatId,
+        title: "שחרור מחסימה",
+        description: "תשלום חד־פעמי לשחרור מיידי מהחסימה בבוט.",
+        payload: `unblock:${reqTmp.id}:${from.id}`,
+        currency: "XTR",
+        prices: [{ label: `${price} Stars`, amount: price }],
+      }).catch(() => sendMessage(chatId, "❌ לא הצלחתי לפתוח חלון תשלום.").catch(() => {}));
+      return;
+    }
     const req = await createUnblockRequest({
       telegram_id: Number(from.id),
       stars: price,
@@ -1620,6 +1643,10 @@ async function handleAdminCallback(cq: any, data: string) {
       return await sendMessage(chatId, "ℹ️ הבקשה כבר טופלה.").then(() => {}).catch(() => {});
     }
     await setUnblockRequestStatus(reqId, approve ? "approved" : "rejected", userId).catch(() => {});
+    // Remove the decision message so the admin can't approve twice.
+    if (messageId) {
+      await tg("deleteMessage", { chat_id: chatId, message_id: messageId }).catch(() => {});
+    }
     if (approve) {
       await sendMessage(
         req.telegram_id,

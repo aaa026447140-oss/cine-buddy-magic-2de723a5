@@ -237,16 +237,57 @@ function truncate(s: string, n: number) {
 const JUNK_LINE =
   /(t\.me|https?:\/\/|\[.*\]\(|צפי[יה]ה ישירה|קבוצת הבקשות|שתפו|הצטרפו|הצטרף|ערוץ |לערוץ|מנוי|בילעדי|בלעדי|הועלה|קרדיט|מתורגם על ידי|תרגום|מדובב|איכות|ז'אנר|תקציר|שמע:|מקור קובץ|טריילר|subscribe|join )/i;
 const TITLEISH = /\(?(19|20)\d{2}\)?|עונה\s*\d|פרק\s*\d|s\d{1,2}\s*e\d{1,2}/i;
+/** Channel-banner lines such as "לולו סרטים", "טרמינל סרטים 🎬", "שלום מדיה". */
+const BANNER_LINE =
+  /^[\s\p{Emoji}\p{P}]*([\u0590-\u05FFa-z' ]{2,20})?\s*(סרטים|סדרות|מדיה|טי ?וי|tv|movies|series|channel)\s*[\s\p{Emoji}\p{P}]*$/iu;
 
-export function movieLabel(raw: string): string {
+/** Removes leading/trailing emoji and punctuation decoration from a line. */
+function stripDecoration(line: string): string {
+  return line
+    .replace(/^[\s\p{Emoji_Presentation}\p{Extended_Pictographic}\p{P}\p{S}]+/u, "")
+    .replace(/[\s\p{Emoji_Presentation}\p{Extended_Pictographic}\p{S}]+$/u, "")
+    .trim();
+}
+
+function normalizeForMatch(s: string) {
+  return s.toLowerCase().replace(/[\u0591-\u05C7]/g, "").replace(/[^\p{L}\p{N} ]+/gu, " ");
+}
+
+/**
+ * Picks the best line to show on a result button. Junk/banner lines are
+ * skipped, lines containing the user's search words win, then title-looking
+ * lines (year / season / episode), then the first informative line.
+ */
+export function movieLabel(raw: string, query = ""): string {
   const lines = (raw || "")
     .split("\n")
-    .map((l) => cleanButtonText(l))
+    .map((l) => stripDecoration(cleanButtonText(l)))
     .filter((l) => l && l !== "ללא שם" && Array.from(l).length >= 3);
   if (!lines.length) return raw || "";
-  const candidates = lines.filter((l) => !JUNK_LINE.test(l));
-  const pool = candidates.length ? candidates : lines;
-  return pool.find((l) => TITLEISH.test(l)) || pool[0];
+
+  const words = normalizeForMatch(query)
+    .split(/\s+/)
+    .filter((w) => w.length >= 2);
+
+  let best = "";
+  let bestScore = -Infinity;
+  lines.forEach((line, idx) => {
+    const norm = normalizeForMatch(line);
+    let score = 0;
+    if (JUNK_LINE.test(line)) score -= 60;
+    if (BANNER_LINE.test(line)) score -= 80;
+    if (words.length && words.every((w) => norm.includes(w))) score += 120;
+    else if (words.some((w) => norm.includes(w))) score += 60;
+    if (TITLEISH.test(line)) score += 25;
+    const len = Array.from(line).length;
+    score += Math.min(len, 60) / 6;
+    score -= idx; // prefer earlier lines on a tie
+    if (score > bestScore) {
+      bestScore = score;
+      best = line;
+    }
+  });
+  return best || lines[0];
 }
 
 function cleanButtonText(value: string) {

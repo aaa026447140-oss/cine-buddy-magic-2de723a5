@@ -684,12 +684,82 @@ async function handleMessage(msg: any) {
 
 /** Message shown to an already-blocked user, including release time. */
 function blockedNotice(u: { blocked_until?: string | null; block_reason?: string | null }) {
+  return blockedNoticeText(u);
+}
+
+function blockedNoticeText(u: { blocked_until?: string | null; block_reason?: string | null }) {
   if (!u.blocked_until) return "🚫 אתה חסום לצמיתות. פנה למנהל.";
   return (
     "🚫 אתה חסום כרגע.\n" +
     (u.block_reason ? `סיבה: ${u.block_reason}\n` : "") +
     `תשוחרר: ${formatWhen(u.blocked_until)}`
   );
+}
+
+// ───── Admin contact group (support tickets) ─────
+
+/** A user's message to the admin: copied into the contact group with a header. */
+async function forwardSupportMessage(msg: any) {
+  const from = msg.from;
+  const settings = await getSettings();
+  const gid = Number(settings.support_group_id || 0);
+  if (!gid) {
+    await sendMessage(msg.chat.id, "❌ אין כרגע קבוצת פניות מוגדרת. נסה שוב מאוחר יותר.").catch(() => {});
+    return;
+  }
+  const name = escapeHtml(
+    [from.first_name, from.last_name].filter(Boolean).join(" ") || String(from.id),
+  );
+  const header =
+    `✉️ <b>פנייה חדשה</b>\n` +
+    `👤 ${name}${from.username ? ` · @${escapeHtml(from.username)}` : ""}\n` +
+    `🆔 <code>${from.id}</code>\n\n` +
+    `<i>כדי להשיב — הגב על ההודעה הזו או על ההודעה של המשתמש.</i>`;
+  try {
+    const head: any = await sendMessage(gid, header);
+    const copied: any = await copyMessage(gid, msg.chat.id, msg.message_id);
+    if (head?.message_id) await saveSupportThread(gid, Number(head.message_id), Number(from.id)).catch(() => {});
+    if (copied?.message_id) await saveSupportThread(gid, Number(copied.message_id), Number(from.id)).catch(() => {});
+    await sendMessage(msg.chat.id, "✅ הפנייה נשלחה לאדמין. תקבל תשובה כאן בצ׳אט.").catch(() => {});
+  } catch (e: any) {
+    console.error("support forward failed:", e?.message);
+    await sendMessage(msg.chat.id, "❌ לא הצלחתי לשלוח את הפנייה. נסה שוב מאוחר יותר.").catch(() => {});
+  }
+}
+
+/** Main-admin replies inside the contact group are relayed to the user. */
+async function handleSupportGroupMessage(msg: any) {
+  const from = msg.from;
+  if (Number(from?.id) !== ADMIN_ID) return;
+  if (msg.text && msg.text.trim() === "/cancel") return;
+  const replyTo = msg.reply_to_message;
+  if (!replyTo) {
+    await sendMessage(
+      msg.chat.id,
+      "ℹ️ כדי לשלוח הודעה למשתמש — <b>הגב על ההודעה שלו</b> כאן בקבוצה. הודעה שלא נשלחה כתגובה לא נשלחת לאף אחד.",
+      { reply_to_message_id: msg.message_id } as any,
+    ).catch(() => {});
+    return;
+  }
+  const target = await getSupportThreadUser(Number(msg.chat.id), Number(replyTo.message_id)).catch(() => null);
+  if (!target) {
+    await sendMessage(
+      msg.chat.id,
+      "❌ לא זיהיתי משתמש בהודעה שהגבת עליה. הגב על הודעת הפנייה של המשתמש.",
+      { reply_to_message_id: msg.message_id } as any,
+    ).catch(() => {});
+    return;
+  }
+  try {
+    await copyMessage(target, msg.chat.id, msg.message_id);
+    await sendMessage(msg.chat.id, "✅ נשלח למשתמש.", { reply_to_message_id: msg.message_id } as any).catch(() => {});
+  } catch (e: any) {
+    await sendMessage(
+      msg.chat.id,
+      `❌ לא הצלחתי לשלוח למשתמש: ${escapeHtml(e?.description || e?.message || "")}`,
+      { reply_to_message_id: msg.message_id } as any,
+    ).catch(() => {});
+  }
 }
 
 /**

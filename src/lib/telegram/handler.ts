@@ -1752,6 +1752,36 @@ async function handleAdminCallback(cq: any, data: string) {
       return await renderPremiumUser(chatId, messageId, tid);
     }
   }
+  if (data.startsWith("admin_premdur_")) {
+    const tid = Number(data.slice("admin_premdur_".length));
+    if (Number.isFinite(tid)) return await renderPremiumDurations(chatId, messageId, tid);
+  }
+  if (data.startsWith("admin_premgive:")) {
+    const [, idText, daysText] = data.split(":");
+    const tid = Number(idText);
+    const days = Number(daysText);
+    if (Number.isFinite(tid) && Number.isFinite(days) && days > 0) {
+      await setPremium(tid, true, days).catch(() => {});
+      const ent = await getEntitlements(tid).catch(() => null);
+      await sendMessage(
+        tid,
+        `💎 קיבלת פרימיום ל-<b>${days}</b> ימים — חיפושים ללא הגבלה!` +
+          (ent?.premium_until
+            ? `\n📅 בתוקף עד: <b>${new Date(ent.premium_until).toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" })}</b>`
+            : ""),
+      ).catch(() => {});
+      return await renderPremiumUser(chatId, messageId, tid);
+    }
+  }
+  if (data.startsWith("admin_premmanual_")) {
+    const tid = Number(data.slice("admin_premmanual_".length));
+    if (Number.isFinite(tid)) {
+      await setAdminState(userId, `awaiting_prem_days:${tid}`);
+      return await sendMessage(chatId, "🔢 שלח מספר ימים להענקת פרימיום (למשל 45).\nשלח /cancel לביטול.")
+        .then(() => {})
+        .catch(() => {});
+    }
+  }
   if (data.startsWith("admin_ul:")) {
     const [, sort, pageText, blockedText] = data.split(":");
     return await renderUsersList(chatId, messageId, {
@@ -2088,6 +2118,23 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
     await sendMessage(chatId, `🚫 <b>מילים חסומות</b>\nסה״כ: <b>${words.length}</b>`, {
       reply_markup: blockedWordsKeyboard(words.slice(0, 60)),
     }).catch(() => {});
+    return;
+  }
+  if (st.state?.startsWith("awaiting_prem_days:")) {
+    const tid = Number(st.state.split(":")[1]);
+    const days = Math.round(Number(text.replace(/[^\d]/g, "")));
+    if (!Number.isFinite(days) || days <= 0 || days > 3650) {
+      await sendMessage(chatId, "❌ מספר ימים לא תקין. שלח מספר בין 1 ל-3650, או /cancel לביטול.").catch(() => {});
+      return;
+    }
+    await setAdminState(userId, null);
+    await setPremium(tid, true, days).catch(() => {});
+    const ent = await getEntitlements(tid).catch(() => null);
+    const untilText = ent?.premium_until
+      ? new Date(ent.premium_until).toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" })
+      : "";
+    await sendMessage(tid, `💎 קיבלת פרימיום ל-<b>${days}</b> ימים — חיפושים ללא הגבלה!${untilText ? `\n📅 בתוקף עד: <b>${untilText}</b>` : ""}`).catch(() => {});
+    await sendMessage(chatId, `✅ הוענק פרימיום ל-${days} ימים למשתמש <code>${tid}</code>.${untilText ? `\n📅 עד ${untilText}` : ""}`).catch(() => {});
     return;
   }
   if (st.state === "awaiting_prem_search") {
@@ -2427,12 +2474,41 @@ async function renderPremiumUser(chatId: number, messageId: number, telegramId: 
         [
           isPrem
             ? { text: "🚫 הסר פרימיום", callback_data: `admin_premtg_${telegramId}_0` }
-            : { text: "💎 העניק פרימיום", callback_data: `admin_premtg_${telegramId}_1` },
+            : { text: "💎 העניק פרימיום", callback_data: `admin_premdur_${telegramId}` },
         ],
+        ...(isPrem ? [[{ text: "➕ הארך פרימיום", callback_data: `admin_premdur_${telegramId}` }]] : []),
         [{ text: "« חזרה לרשימה", callback_data: "admin_prem:recent:0" }],
       ],
     },
   }).catch(() => {});
+}
+
+export const PREMIUM_DURATION_OPTIONS: { days: number; label: string }[] = [
+  { days: 7, label: "🗓️ שבוע (7 ימים)" },
+  { days: 30, label: "🗓️ חודש (30 ימים)" },
+  { days: 90, label: "🗓️ 90 ימים" },
+  { days: 365, label: "🗓️ שנה (365 ימים)" },
+];
+
+async function renderPremiumDurations(chatId: number, messageId: number, telegramId: number) {
+  const u = await getBotUser(telegramId).catch(() => null);
+  const ent = await getEntitlements(telegramId).catch(() => null);
+  const name = u ? escapeHtml(displayUserName(u)) : String(telegramId);
+  const rows = PREMIUM_DURATION_OPTIONS.map((o) => [
+    { text: o.label, callback_data: `admin_premgive:${telegramId}:${o.days}` },
+  ]);
+  rows.push([{ text: "✍️ הזנת מספר ימים ידנית", callback_data: `admin_premmanual_${telegramId}` }]);
+  rows.push([{ text: "« חזרה", callback_data: `admin_premu_${telegramId}` }]);
+  await editMessageText(
+    chatId,
+    messageId,
+    `💎 <b>הענקת פרימיום</b>\n👤 ${name}\n\n` +
+      (ent?.is_premium && ent.premium_until
+        ? `הפרימיום הנוכחי בתוקף עד <b>${new Date(ent.premium_until).toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" })}</b> — הימים יתווספו על גביו.\n\n`
+        : "") +
+      "בחר את משך הפרימיום:",
+    { reply_markup: { inline_keyboard: rows } },
+  ).catch(() => {});
 }
 
 async function renderSearchHistory(chatId: number, messageId: number, telegramId: number) {

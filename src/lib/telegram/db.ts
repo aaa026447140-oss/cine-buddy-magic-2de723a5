@@ -856,20 +856,21 @@ export async function addExtraCredits(telegram_id: number, amount: number) {
 export const PREMIUM_DAYS = 30;
 
 /**
- * Grant or revoke premium. Granting always gives a full month; when the user is
- * still inside an active period the new month is added on top of it.
+ * Grant or revoke premium. Granting gives `days` (default a month); when the
+ * user is still inside an active period the new time is added on top of it.
  */
-export async function setPremium(telegram_id: number, on: boolean) {
+export async function setPremium(telegram_id: number, on: boolean, days: number = PREMIUM_DAYS) {
   await ensureEntitlements(telegram_id);
   const now = Date.now();
   let until: string | null = null;
+  let since: string | null = null;
   if (on) {
     const cur = await getEntitlements(telegram_id).catch(() => null);
-    const base =
-      cur?.is_premium && cur.premium_until && new Date(cur.premium_until).getTime() > now
-        ? new Date(cur.premium_until).getTime()
-        : now;
-    until = new Date(base + PREMIUM_DAYS * 86400_000).toISOString();
+    const active = !!cur?.is_premium && !!cur?.premium_until && new Date(cur.premium_until!).getTime() > now;
+    const base = active ? new Date(cur!.premium_until!).getTime() : now;
+    until = new Date(base + Math.max(1, Math.round(days)) * 86400_000).toISOString();
+    // Keep the original purchase date when extending an active subscription.
+    since = active ? null : new Date().toISOString();
   }
   await admin()
     .from("user_entitlements")
@@ -878,7 +879,7 @@ export async function setPremium(telegram_id: number, on: boolean) {
       premium_until: until,
       premium_warned_at: null,
       premium_expired_notified_at: null,
-      premium_since: on ? new Date().toISOString() : null,
+      ...(on ? (since ? { premium_since: since } : {}) : { premium_since: null }),
       updated_at: new Date().toISOString(),
     })
     .eq("telegram_id", telegram_id);

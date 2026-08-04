@@ -1130,6 +1130,32 @@ async function handleCallback(cq: any) {
     return;
   }
 
+  if (data === "prem_renew_no") {
+    await answerCallbackQuery(cq.id);
+    await tg("deleteMessage", { chat_id: chatId, message_id: msg.message_id }).catch(() => {});
+    return;
+  }
+
+  if (data === "prem_renew_yes") {
+    await answerCallbackQuery(cq.id);
+    await tg("deleteMessage", { chat_id: chatId, message_id: msg.message_id }).catch(() => {});
+    const sP = await getSettings();
+    const amount = Number(sP.price_premium || 0);
+    if (!(amount > 0)) return;
+    await sendInvoice({
+      chat_id: chatId,
+      title: "חידוש פרימיום — חודש נוסף",
+      description: "חיפושים ללא הגבלה למשך חודש נוסף.",
+      payload: `buy:premium:${from.id}:${Date.now()}`,
+      currency: "XTR",
+      prices: [{ label: `${amount} Stars`, amount }],
+    }).catch((e: any) => {
+      console.error("sendInvoice failed:", e?.message);
+      sendMessage(chatId, "❌ לא הצלחתי לפתוח חלון תשלום. נסה שוב מאוחר יותר.");
+    });
+    return;
+  }
+
   if (data === "buy_single" || data === "buy_daily" || data === "buy_premium") {
     await answerCallbackQuery(cq.id);
     const s = await getSettings();
@@ -1137,7 +1163,7 @@ async function handleCallback(cq: any) {
     const map: Record<string, { amount: number; title: string; desc: string }> = {
       single: { amount: s.price_single_search, title: "חיפוש נוסף חד־פעמי", desc: "חיפוש אחד נוסף מעבר למכסה היומית." },
       daily: { amount: s.price_daily_extra, title: "+1 חיפוש בכל יום", desc: "תוספת קבועה של חיפוש אחד בכל יום, לתמיד." },
-      premium: { amount: s.price_premium, title: "פרימיום — ללא הגבלה", desc: "חיפושים ללא הגבלה, ללא מכסה יומית." },
+      premium: { amount: s.price_premium, title: "פרימיום לחודש — ללא הגבלה", desc: "חיפושים ללא הגבלה למשך 30 ימים." },
     };
     const item = map[kind];
     if (!item || !(item.amount > 0)) return;

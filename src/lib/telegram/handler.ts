@@ -218,6 +218,7 @@ async function isSubscribed(userId: number, settings: BotSettings): Promise<bool
 type QuotaInfo = {
   enabled: boolean;
   premium: boolean;
+  premiumUntil: string | null;
   limit: number;
   used: number;
   bonus: number;
@@ -234,6 +235,7 @@ async function quotaInfo(userId: number, settings: BotSettings): Promise<QuotaIn
   return {
     enabled: !!settings.quota_enabled,
     premium: !!ent?.is_premium,
+    premiumUntil: ent?.premium_until ?? null,
     limit: Math.max(0, Number(settings.free_searches_per_day || 0)) + bonus,
     used,
     bonus,
@@ -292,7 +294,11 @@ function quotaText(q: QuotaInfo, s: BotSettings, botUsername: string, userId: nu
   if (q.premium) {
     return (
       `💎 <b>פרימיום פעיל</b>\n\n` +
-      `יש לך חיפושים <b>ללא הגבלה</b>. תודה על התמיכה ❤️\n\n` +
+      `יש לך חיפושים <b>ללא הגבלה</b>. תודה על התמיכה ❤️\n` +
+      (q.premiumUntil
+        ? `📅 בתוקף עד: <b>${new Date(q.premiumUntil).toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" })}</b>\n`
+        : "") +
+      `\n` +
       `🔗 קישור ההזמנה שלך:\n<code>https://t.me/${botUsername}?start=r_${userId}</code>`
     );
   }
@@ -307,7 +313,7 @@ function quotaText(q: QuotaInfo, s: BotSettings, botUsername: string, userId: nu
     `💫 אפשר גם לרכוש:\n` +
     `• ⚡ חיפוש נוסף חד־פעמי — ${s.price_single_search} ⭐\n` +
     `• 📅 +1 חיפוש בכל יום (לתמיד) — ${s.price_daily_extra} ⭐\n` +
-    `• 💎 פרימיום ללא הגבלה — ${s.price_premium} ⭐`
+    `• 💎 פרימיום לחודש ללא הגבלה — ${s.price_premium} ⭐`
   );
 }
 

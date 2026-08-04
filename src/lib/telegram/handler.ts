@@ -2457,12 +2457,41 @@ async function renderPremiumUser(chatId: number, messageId: number, telegramId: 
         [
           isPrem
             ? { text: "🚫 הסר פרימיום", callback_data: `admin_premtg_${telegramId}_0` }
-            : { text: "💎 העניק פרימיום", callback_data: `admin_premtg_${telegramId}_1` },
+            : { text: "💎 העניק פרימיום", callback_data: `admin_premdur_${telegramId}` },
         ],
+        ...(isPrem ? [[{ text: "➕ הארך פרימיום", callback_data: `admin_premdur_${telegramId}` }]] : []),
         [{ text: "« חזרה לרשימה", callback_data: "admin_prem:recent:0" }],
       ],
     },
   }).catch(() => {});
+}
+
+export const PREMIUM_DURATION_OPTIONS: { days: number; label: string }[] = [
+  { days: 7, label: "🗓️ שבוע (7 ימים)" },
+  { days: 30, label: "🗓️ חודש (30 ימים)" },
+  { days: 90, label: "🗓️ 90 ימים" },
+  { days: 365, label: "🗓️ שנה (365 ימים)" },
+];
+
+async function renderPremiumDurations(chatId: number, messageId: number, telegramId: number) {
+  const u = await getBotUser(telegramId).catch(() => null);
+  const ent = await getEntitlements(telegramId).catch(() => null);
+  const name = u ? escapeHtml(displayUserName(u)) : String(telegramId);
+  const rows = PREMIUM_DURATION_OPTIONS.map((o) => [
+    { text: o.label, callback_data: `admin_premgive:${telegramId}:${o.days}` },
+  ]);
+  rows.push([{ text: "✍️ הזנת מספר ימים ידנית", callback_data: `admin_premmanual_${telegramId}` }]);
+  rows.push([{ text: "« חזרה", callback_data: `admin_premu_${telegramId}` }]);
+  await editMessageText(
+    chatId,
+    messageId,
+    `💎 <b>הענקת פרימיום</b>\n👤 ${name}\n\n` +
+      (ent?.is_premium && ent.premium_until
+        ? `הפרימיום הנוכחי בתוקף עד <b>${new Date(ent.premium_until).toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" })}</b> — הימים יתווספו על גביו.\n\n`
+        : "") +
+      "בחר את משך הפרימיום:",
+    { reply_markup: { inline_keyboard: rows } },
+  ).catch(() => {});
 }
 
 async function renderSearchHistory(chatId: number, messageId: number, telegramId: number) {

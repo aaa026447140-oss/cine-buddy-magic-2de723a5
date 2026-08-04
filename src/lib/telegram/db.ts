@@ -804,6 +804,7 @@ export type Entitlements = {
   bonus_daily: number;
   extra_credits: number;
   is_premium: boolean;
+  premium_until: string | null;
   referred_by: number | null;
   referrals_count: number;
 };
@@ -811,19 +812,23 @@ export type Entitlements = {
 export async function getEntitlements(telegram_id: number): Promise<Entitlements> {
   const { data } = await admin()
     .from("user_entitlements")
-    .select("telegram_id,bonus_daily,extra_credits,is_premium,referred_by,referrals_count")
+    .select("telegram_id,bonus_daily,extra_credits,is_premium,premium_until,referred_by,referrals_count")
     .eq("telegram_id", telegram_id)
     .maybeSingle();
-  return (
-    (data as any) ?? {
-      telegram_id,
-      bonus_daily: 0,
-      extra_credits: 0,
-      is_premium: false,
-      referred_by: null,
-      referrals_count: 0,
-    }
-  );
+  const row: any = data ?? {
+    telegram_id,
+    bonus_daily: 0,
+    extra_credits: 0,
+    is_premium: false,
+    premium_until: null,
+    referred_by: null,
+    referrals_count: 0,
+  };
+  // Premium is monthly: treat an elapsed period as inactive even before the sweep runs.
+  if (row.is_premium && row.premium_until && new Date(row.premium_until).getTime() <= Date.now()) {
+    row.is_premium = false;
+  }
+  return row as Entitlements;
 }
 
 async function ensureEntitlements(telegram_id: number) {

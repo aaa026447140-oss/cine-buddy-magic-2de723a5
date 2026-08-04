@@ -2120,9 +2120,6 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
     }).catch(() => {});
     return;
   }
-  if (st.state === "awaiting_prem_search") {
-    // handled below
-  }
   if (st.state?.startsWith("awaiting_prem_days:")) {
     const tid = Number(st.state.split(":")[1]);
     const days = Math.round(Number(text.replace(/[^\d]/g, "")));

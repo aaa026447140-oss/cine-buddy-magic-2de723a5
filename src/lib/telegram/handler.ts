@@ -2416,6 +2416,9 @@ async function renderPremiumUser(chatId: number, messageId: number, telegramId: 
     `🆔 ID: <code>${telegramId}</code>\n` +
     (u?.username ? `📛 שם משתמש: @${escapeHtml(u.username)}\n` : "") +
     `💎 פרימיום: <b>${isPrem ? "פעיל" : "לא פעיל"}</b>\n` +
+    (isPrem && ent?.premium_until
+      ? `📅 בתוקף עד: <b>${new Date(ent.premium_until).toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" })}</b>\n`
+      : "") +
     `🎁 בונוס יומי קבוע: <b>${ent?.bonus_daily ?? 0}</b>\n` +
     `⚡ חיפושים חד־פעמיים: <b>${ent?.extra_credits ?? 0}</b>`;
   await editMessageText(chatId, messageId, text, {

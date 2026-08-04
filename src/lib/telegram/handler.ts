@@ -2121,6 +2121,26 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
     return;
   }
   if (st.state === "awaiting_prem_search") {
+    // handled below
+  }
+  if (st.state?.startsWith("awaiting_prem_days:")) {
+    const tid = Number(st.state.split(":")[1]);
+    const days = Math.round(Number(text.replace(/[^\d]/g, "")));
+    if (!Number.isFinite(days) || days <= 0 || days > 3650) {
+      await sendMessage(chatId, "❌ מספר ימים לא תקין. שלח מספר בין 1 ל-3650, או /cancel לביטול.").catch(() => {});
+      return;
+    }
+    await setAdminState(userId, null);
+    await setPremium(tid, true, days).catch(() => {});
+    const ent = await getEntitlements(tid).catch(() => null);
+    const untilText = ent?.premium_until
+      ? new Date(ent.premium_until).toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" })
+      : "";
+    await sendMessage(tid, `💎 קיבלת פרימיום ל-<b>${days}</b> ימים — חיפושים ללא הגבלה!${untilText ? `\n📅 בתוקף עד: <b>${untilText}</b>` : ""}`).catch(() => {});
+    await sendMessage(chatId, `✅ הוענק פרימיום ל-${days} ימים למשתמש <code>${tid}</code>.${untilText ? `\n📅 עד ${untilText}` : ""}`).catch(() => {});
+    return;
+  }
+  if (st.state === "awaiting_prem_search") {
     await setAdminState(userId, null);
     const results = await searchBotUsers(text, 20);
     const kb: any[][] = await premiumUserRows(results);

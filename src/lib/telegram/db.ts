@@ -804,6 +804,7 @@ export type Entitlements = {
   bonus_daily: number;
   extra_credits: number;
   is_premium: boolean;
+  premium_until: string | null;
   referred_by: number | null;
   referrals_count: number;
 };
@@ -811,19 +812,23 @@ export type Entitlements = {
 export async function getEntitlements(telegram_id: number): Promise<Entitlements> {
   const { data } = await admin()
     .from("user_entitlements")
-    .select("telegram_id,bonus_daily,extra_credits,is_premium,referred_by,referrals_count")
+    .select("telegram_id,bonus_daily,extra_credits,is_premium,premium_until,referred_by,referrals_count")
     .eq("telegram_id", telegram_id)
     .maybeSingle();
-  return (
-    (data as any) ?? {
-      telegram_id,
-      bonus_daily: 0,
-      extra_credits: 0,
-      is_premium: false,
-      referred_by: null,
-      referrals_count: 0,
-    }
-  );
+  const row: any = data ?? {
+    telegram_id,
+    bonus_daily: 0,
+    extra_credits: 0,
+    is_premium: false,
+    premium_until: null,
+    referred_by: null,
+    referrals_count: 0,
+  };
+  // Premium is monthly: treat an elapsed period as inactive even before the sweep runs.
+  if (row.is_premium && row.premium_until && new Date(row.premium_until).getTime() <= Date.now()) {
+    row.is_premium = false;
+  }
+  return row as Entitlements;
 }
 
 async function ensureEntitlements(telegram_id: number) {
@@ -848,13 +853,81 @@ export async function addExtraCredits(telegram_id: number, amount: number) {
     .eq("telegram_id", telegram_id);
 }
 
+export const PREMIUM_DAYS = 30;
+
+/**
+ * Grant or revoke premium. Granting always gives a full month; when the user is
+ * still inside an active period the new month is added on top of it.
+ */
 export async function setPremium(telegram_id: number, on: boolean) {
   await ensureEntitlements(telegram_id);
+  const now = Date.now();
+  let until: string | null = null;
+  if (on) {
+    const cur = await getEntitlements(telegram_id).catch(() => null);
+    const base =
+      cur?.is_premium && cur.premium_until && new Date(cur.premium_until).getTime() > now
+        ? new Date(cur.premium_until).getTime()
+        : now;
+    until = new Date(base + PREMIUM_DAYS * 86400_000).toISOString();
+  }
   await admin()
     .from("user_entitlements")
     .update({
       is_premium: on,
+      premium_until: until,
+      premium_warned_at: null,
+      premium_expired_notified_at: null,
       premium_since: on ? new Date().toISOString() : null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("telegram_id", telegram_id);
+}
+
+/** Premium members whose period ends within `days` and were not warned yet. */
+export async function premiumExpiringSoon(days: number, limit = 200) {
+  const until = new Date(Date.now() + days * 86400_000).toISOString();
+  const { data } = await admin()
+    .from("user_entitlements")
+    .select("telegram_id,premium_until")
+    .eq("is_premium", true)
+    .is("premium_warned_at", null)
+    .not("premium_until", "is", null)
+    .lte("premium_until", until)
+    .gt("premium_until", new Date().toISOString())
+    .limit(limit);
+  return ((data ?? []) as any[]).map((r) => ({
+    telegram_id: Number(r.telegram_id),
+    premium_until: String(r.premium_until),
+  }));
+}
+
+export async function markPremiumWarned(telegram_id: number) {
+  await admin()
+    .from("user_entitlements")
+    .update({ premium_warned_at: new Date().toISOString() })
+    .eq("telegram_id", telegram_id);
+}
+
+/** Premium periods that have just ended and still need the renewal prompt. */
+export async function premiumJustExpired(limit = 200) {
+  const { data } = await admin()
+    .from("user_entitlements")
+    .select("telegram_id,premium_until")
+    .eq("is_premium", true)
+    .not("premium_until", "is", null)
+    .lte("premium_until", new Date().toISOString())
+    .limit(limit);
+  return ((data ?? []) as any[]).map((r) => Number(r.telegram_id));
+}
+
+/** End an elapsed premium period (keeps the record, just turns the flag off). */
+export async function expirePremium(telegram_id: number) {
+  await admin()
+    .from("user_entitlements")
+    .update({
+      is_premium: false,
+      premium_expired_notified_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
     .eq("telegram_id", telegram_id);
@@ -903,6 +976,19 @@ export async function premiumIdsAmong(ids: number[]): Promise<Set<number>> {
     .in("telegram_id", ids)
     .eq("is_premium", true);
   return new Set(((data ?? []) as any[]).map((r) => Number(r.telegram_id)));
+}
+
+/** Premium end dates for the given users (only those with an active period). */
+export async function premiumUntilAmong(ids: number[]): Promise<Map<number, string>> {
+  if (!ids.length) return new Map();
+  const { data } = await admin()
+    .from("user_entitlements")
+    .select("telegram_id,premium_until")
+    .in("telegram_id", ids)
+    .eq("is_premium", true);
+  const m = new Map<number, string>();
+  for (const r of (data ?? []) as any[]) if (r.premium_until) m.set(Number(r.telegram_id), String(r.premium_until));
+  return m;
 }
 
 /** Atomically consume one search against the daily limit / one-off credits. */

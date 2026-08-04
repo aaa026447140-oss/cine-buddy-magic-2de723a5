@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiPublicTelegramWebhookRouteImport } from './routes/api/public/telegram/webhook'
+import { Route as ApiPublicHooksPremiumTickRouteImport } from './routes/api/public/hooks/premium-tick'
 import { Route as ApiPublicHooksBroadcastTickRouteImport } from './routes/api/public/hooks/broadcast-tick'
 
 const IndexRoute = IndexRouteImport.update({
@@ -24,6 +25,12 @@ const ApiPublicTelegramWebhookRoute =
     path: '/api/public/telegram/webhook',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicHooksPremiumTickRoute =
+  ApiPublicHooksPremiumTickRouteImport.update({
+    id: '/api/public/hooks/premium-tick',
+    path: '/api/public/hooks/premium-tick',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicHooksBroadcastTickRoute =
   ApiPublicHooksBroadcastTickRouteImport.update({
     id: '/api/public/hooks/broadcast-tick',
@@ -34,17 +41,20 @@ const ApiPublicHooksBroadcastTickRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/api/public/hooks/broadcast-tick': typeof ApiPublicHooksBroadcastTickRoute
+  '/api/public/hooks/premium-tick': typeof ApiPublicHooksPremiumTickRoute
   '/api/public/telegram/webhook': typeof ApiPublicTelegramWebhookRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/api/public/hooks/broadcast-tick': typeof ApiPublicHooksBroadcastTickRoute
+  '/api/public/hooks/premium-tick': typeof ApiPublicHooksPremiumTickRoute
   '/api/public/telegram/webhook': typeof ApiPublicTelegramWebhookRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/api/public/hooks/broadcast-tick': typeof ApiPublicHooksBroadcastTickRoute
+  '/api/public/hooks/premium-tick': typeof ApiPublicHooksPremiumTickRoute
   '/api/public/telegram/webhook': typeof ApiPublicTelegramWebhookRoute
 }
 export interface FileRouteTypes {
@@ -52,19 +62,26 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/api/public/hooks/broadcast-tick'
+    | '/api/public/hooks/premium-tick'
     | '/api/public/telegram/webhook'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/api/public/hooks/broadcast-tick' | '/api/public/telegram/webhook'
+  to:
+    | '/'
+    | '/api/public/hooks/broadcast-tick'
+    | '/api/public/hooks/premium-tick'
+    | '/api/public/telegram/webhook'
   id:
     | '__root__'
     | '/'
     | '/api/public/hooks/broadcast-tick'
+    | '/api/public/hooks/premium-tick'
     | '/api/public/telegram/webhook'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ApiPublicHooksBroadcastTickRoute: typeof ApiPublicHooksBroadcastTickRoute
+  ApiPublicHooksPremiumTickRoute: typeof ApiPublicHooksPremiumTickRoute
   ApiPublicTelegramWebhookRoute: typeof ApiPublicTelegramWebhookRoute
 }
 
@@ -84,6 +101,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicTelegramWebhookRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/hooks/premium-tick': {
+      id: '/api/public/hooks/premium-tick'
+      path: '/api/public/hooks/premium-tick'
+      fullPath: '/api/public/hooks/premium-tick'
+      preLoaderRoute: typeof ApiPublicHooksPremiumTickRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/hooks/broadcast-tick': {
       id: '/api/public/hooks/broadcast-tick'
       path: '/api/public/hooks/broadcast-tick'
@@ -97,6 +121,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ApiPublicHooksBroadcastTickRoute: ApiPublicHooksBroadcastTickRoute,
+  ApiPublicHooksPremiumTickRoute: ApiPublicHooksPremiumTickRoute,
   ApiPublicTelegramWebhookRoute: ApiPublicTelegramWebhookRoute,
 }
 export const routeTree = rootRouteImport

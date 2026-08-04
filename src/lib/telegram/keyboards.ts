@@ -50,7 +50,7 @@ export function quotaMenuKeyboard(
   if (!isPremium) {
     rows.push([{ text: `⚡ חיפוש נוסף חד־פעמי · ${s.price_single_search} ⭐`, callback_data: "buy_single" }]);
     rows.push([{ text: `📅 +1 חיפוש כל יום · ${s.price_daily_extra} ⭐`, callback_data: "buy_daily" }]);
-    rows.push([{ text: `💎 פרימיום — ללא הגבלה · ${s.price_premium} ⭐`, callback_data: "buy_premium" }]);
+    rows.push([{ text: `💎 פרימיום לחודש — ללא הגבלה · ${s.price_premium} ⭐`, callback_data: "buy_premium" }]);
   }
   rows.push([{ text: "« חזרה", callback_data: "back_to_start" }]);
   return { inline_keyboard: rows };

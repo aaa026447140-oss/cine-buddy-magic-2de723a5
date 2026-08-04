@@ -638,7 +638,10 @@ export type Database = {
           created_at: string
           extra_credits: number
           is_premium: boolean
+          premium_expired_notified_at: string | null
           premium_since: string | null
+          premium_until: string | null
+          premium_warned_at: string | null
           referrals_count: number
           referred_by: number | null
           telegram_id: number
@@ -649,7 +652,10 @@ export type Database = {
           created_at?: string
           extra_credits?: number
           is_premium?: boolean
+          premium_expired_notified_at?: string | null
           premium_since?: string | null
+          premium_until?: string | null
+          premium_warned_at?: string | null
           referrals_count?: number
           referred_by?: number | null
           telegram_id: number
@@ -660,7 +666,10 @@ export type Database = {
           created_at?: string
           extra_credits?: number
           is_premium?: boolean
+          premium_expired_notified_at?: string | null
           premium_since?: string | null
+          premium_until?: string | null
+          premium_warned_at?: string | null
           referrals_count?: number
           referred_by?: number | null
           telegram_id?: number

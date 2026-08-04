@@ -978,6 +978,19 @@ export async function premiumIdsAmong(ids: number[]): Promise<Set<number>> {
   return new Set(((data ?? []) as any[]).map((r) => Number(r.telegram_id)));
 }
 
+/** Premium end dates for the given users (only those with an active period). */
+export async function premiumUntilAmong(ids: number[]): Promise<Map<number, string>> {
+  if (!ids.length) return new Map();
+  const { data } = await admin()
+    .from("user_entitlements")
+    .select("telegram_id,premium_until")
+    .in("telegram_id", ids)
+    .eq("is_premium", true);
+  const m = new Map<number, string>();
+  for (const r of (data ?? []) as any[]) if (r.premium_until) m.set(Number(r.telegram_id), String(r.premium_until));
+  return m;
+}
+
 /** Atomically consume one search against the daily limit / one-off credits. */
 export async function consumeSearch(telegram_id: number, limit: number): Promise<{ allowed: boolean; used: number }> {
   const { data, error } = await admin().rpc("consume_search", { _telegram_id: telegram_id, _limit: limit });

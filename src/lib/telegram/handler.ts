@@ -570,7 +570,14 @@ async function handleMessage(msg: any) {
         await sendMessage(chat.id, "📅 מעכשיו יש לך +1 חיפוש בכל יום, לתמיד. תודה! ❤️");
       } else if (kind === "premium") {
         await setPremium(Number(from.id), true).catch(() => {});
-        await sendMessage(chat.id, "💎 הפרימיום הופעל! חיפושים ללא הגבלה. תודה! ❤️");
+        const entP = await getEntitlements(Number(from.id)).catch(() => null);
+        const untilTxt = entP?.premium_until
+          ? new Date(entP.premium_until).toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" })
+          : "";
+        await sendMessage(
+          chat.id,
+          `💎 הפרימיום הופעל לחודש! חיפושים ללא הגבלה${untilTxt ? ` עד <b>${untilTxt}</b>` : ""}. תודה! ❤️`,
+        );
       }
       return;
     }

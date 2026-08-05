@@ -2137,13 +2137,26 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
       return;
     }
     await setAdminState(userId, null);
-    await setPremium(tid, true, days).catch(() => {});
-    const ent = await getEntitlements(tid).catch(() => null);
-    const untilText = ent?.premium_until
-      ? new Date(ent.premium_until).toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" })
-      : "";
-    await sendMessage(tid, `💎 קיבלת פרימיום ל-<b>${days}</b> ימים — חיפושים ללא הגבלה!${untilText ? `\n📅 בתוקף עד: <b>${untilText}</b>` : ""}`).catch(() => {});
-    await sendMessage(chatId, `✅ הוענק פרימיום ל-${days} ימים למשתמש <code>${tid}</code>.${untilText ? `\n📅 עד ${untilText}` : ""}`).catch(() => {});
+    await grantPremiumAndNotify(chatId, tid, days);
+    return;
+  }
+  if (st.state?.startsWith("awaiting_dm:")) {
+    const tid = Number(st.state.split(":")[1]);
+    await setAdminState(userId, null);
+    const body = (msg.text || msg.caption || "").trim();
+    if (!Number.isFinite(tid) || !body) {
+      await sendMessage(chatId, "❌ לא נשלחה הודעה. נסה שוב מתוך כרטיס המשתמש.").catch(() => {});
+      return;
+    }
+    const ok = await sendMessage(tid, `📩 <b>הודעה מהאדמין</b>\n\n${escapeHtml(body)}`)
+      .then(() => true)
+      .catch(() => false);
+    await sendMessage(
+      chatId,
+      ok
+        ? `✅ ההודעה נשלחה למשתמש <code>${tid}</code>.`
+        : `❌ לא הצלחתי לשלוח למשתמש <code>${tid}</code> (ייתכן שחסם את הבוט).`,
+    ).catch(() => {});
     return;
   }
   if (st.state === "awaiting_prem_search") {

@@ -1755,13 +1755,6 @@ async function handleAdminCallback(cq: any, data: string) {
       ).then(() => {}).catch(() => {});
     }
   }
-  if (data === "__never_admin_prem_search") {
-    await setAdminState(userId, "awaiting_prem_search");
-    return await sendMessage(
-      chatId,
-      "🔎 שלח שם משתמש (עם או בלי @), שם, או ID לחיפוש לניהול פרימיום.\nשלח /cancel לביטול.",
-    ).then(() => {}).catch(() => {});
-  }
   if (data.startsWith("admin_premu_")) {
     const tid = Number(data.slice("admin_premu_".length));
     if (Number.isFinite(tid)) return await renderPremiumUser(chatId, messageId, tid);
@@ -1785,15 +1778,7 @@ async function handleAdminCallback(cq: any, data: string) {
     const tid = Number(idText);
     const days = Number(daysText);
     if (Number.isFinite(tid) && Number.isFinite(days) && days > 0) {
-      await setPremium(tid, true, days).catch(() => {});
-      const ent = await getEntitlements(tid).catch(() => null);
-      await sendMessage(
-        tid,
-        `💎 קיבלת פרימיום ל-<b>${days}</b> ימים — חיפושים ללא הגבלה!` +
-          (ent?.premium_until
-            ? `\n📅 בתוקף עד: <b>${new Date(ent.premium_until).toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" })}</b>`
-            : ""),
-      ).catch(() => {});
+      await grantPremiumAndNotify(chatId, tid, days);
       return await renderPremiumUser(chatId, messageId, tid);
     }
   }

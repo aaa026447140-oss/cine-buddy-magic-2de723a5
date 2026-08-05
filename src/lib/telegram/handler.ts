@@ -2512,6 +2512,7 @@ async function renderPremiumList(
     { text: `${opts.sort === "recent" ? "✅ " : ""}🕓 שימוש אחרון`, callback_data: "admin_prem:recent:0" },
   ]);
   kb.push([{ text: "🔎 חיפוש לפי שם או ID", callback_data: "admin_prem_search" }]);
+  kb.push([{ text: "💎 רשימת משתמשים עם פרימיום", callback_data: "admin_premlist:0" }]);
   kb.push([{ text: "« חזרה", callback_data: "admin_quota" }]);
   await editMessageText(chatId, messageId, `${header}\n\nלחץ על משתמש כדי להעניק או להסיר פרימיום.`, {
     reply_markup: { inline_keyboard: kb },
@@ -2542,6 +2543,7 @@ async function renderPremiumUser(chatId: number, messageId: number, telegramId: 
             : { text: "💎 העניק פרימיום", callback_data: `admin_premdur_${telegramId}` },
         ],
         ...(isPrem ? [[{ text: "➕ הארך פרימיום", callback_data: `admin_premdur_${telegramId}` }]] : []),
+        [{ text: "✉️ שלח הודעה למשתמש", callback_data: `admin_dm_${telegramId}` }],
         [{ text: "« חזרה לרשימה", callback_data: "admin_prem:recent:0" }],
       ],
     },
@@ -2645,6 +2647,7 @@ async function renderUserViewImpl(chatId: number, messageId: number, telegramId:
     reply_markup: {
       inline_keyboard: [
         [actionBtn],
+        [{ text: "✉️ שלח הודעה למשתמש", callback_data: `admin_dm_${u.telegram_id}` }],
         [{ text: "📜 היסטוריית חיפושים", callback_data: `admin_uhist_${u.telegram_id}` }],
         [{ text: "« חזרה לרשימה", callback_data: "admin_users" }],
       ],

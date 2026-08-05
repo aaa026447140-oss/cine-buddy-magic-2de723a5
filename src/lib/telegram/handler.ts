@@ -2421,6 +2421,62 @@ async function renderUnblockRequests(chatId: number, messageId: number) {
 
 const PREMIUM_PAGE_SIZE = 8;
 
+function fmtDay(iso?: string | null) {
+  return iso
+    ? new Date(iso).toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" })
+    : "";
+}
+
+/**
+ * Grants premium and tells the user whether it is a new grant or an extension
+ * on top of an active period, always including the new expiry date.
+ */
+async function grantPremiumAndNotify(adminChatId: number, tid: number, days: number) {
+  const before = await getEntitlements(tid).catch(() => null);
+  const wasActive =
+    !!before?.is_premium && !!before?.premium_until && new Date(before.premium_until).getTime() > Date.now();
+  await setPremium(tid, true, days).catch(() => {});
+  const ent = await getEntitlements(tid).catch(() => null);
+  const until = fmtDay(ent?.premium_until);
+  await sendMessage(
+    tid,
+    wasActive
+      ? `💎 <b>קיבלת הארכה מהמנהל</b>\n\nנוספו לך <b>${days}</b> ימי פרימיום.` +
+          (until ? `\n📅 הפרימיום שלך בתוקף עד: <b>${until}</b>` : "")
+      : `💎 <b>קיבלת פרימיום מהמנהל</b> ל-<b>${days}</b> ימים — חיפושים ללא הגבלה!` +
+          (until ? `\n📅 בתוקף עד: <b>${until}</b>` : ""),
+  ).catch(() => {});
+  await sendMessage(
+    adminChatId,
+    `${wasActive ? "✅ הוארך" : "✅ הוענק"} פרימיום ל-${days} ימים למשתמש <code>${tid}</code>.` +
+      (until ? `\n📅 עד ${until}` : ""),
+  ).catch(() => {});
+}
+
+async function renderPremiumMembers(chatId: number, messageId: number, page: number) {
+  const { rows, total } = await listPremiumMembersPaged({ page, pageSize: PREMIUM_PAGE_SIZE });
+  const totalPages = Math.max(1, Math.ceil(total / PREMIUM_PAGE_SIZE));
+  const kb: any[][] = rows.map((u) => [
+    {
+      text: `💎 ${truncateBtn(displayUserName(u as any), 28)} · ${u.premium_until ? fmtDay(u.premium_until) : "ללא תאריך"}`,
+      callback_data: `admin_premu_${u.telegram_id}`,
+    },
+  ]);
+  const nav: any[] = [];
+  if (page > 0) nav.push({ text: "⬅️ הקודם", callback_data: `admin_premlist:${page - 1}` });
+  nav.push({ text: `${page + 1}/${totalPages}`, callback_data: "noop" });
+  if (page < totalPages - 1) nav.push({ text: "הבא ➡️", callback_data: `admin_premlist:${page + 1}` });
+  if (nav.length > 1) kb.push(nav);
+  kb.push([{ text: "« חזרה", callback_data: "admin_prem:recent:0" }]);
+  await editMessageText(
+    chatId,
+    messageId,
+    `💎 <b>משתמשים עם פרימיום</b>\nסה״כ: <b>${total.toLocaleString()}</b>\nעמוד ${page + 1}/${totalPages}\n\n` +
+      (rows.length ? "לחץ על משתמש כדי לנהל אותו או לשלוח לו הודעה." : "<i>אין כרגע משתמשים עם פרימיום.</i>"),
+    { reply_markup: { inline_keyboard: kb } },
+  ).catch(() => {});
+}
+
 async function premiumUserRows(users: BotUserRow[]) {
   const prem = await premiumIdsAmong(users.map((u) => Number(u.telegram_id))).catch(() => new Set<number>());
   return users.map((u) => [

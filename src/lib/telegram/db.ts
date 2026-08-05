@@ -1239,6 +1239,41 @@ export async function removeRequiredChannel(chat_id: number) {
 // ───── Users listing (paged + sortable) ─────
 export type UserSort = "joined" | "recent";
 
+/** Paged list of active premium members, soonest expiry first. */
+export async function listPremiumMembersPaged(opts: {
+  page: number;
+  pageSize: number;
+}): Promise<{ rows: (BotUserRow & { premium_until: string | null })[]; total: number }> {
+  const from = opts.page * opts.pageSize;
+  const { data, count } = await admin()
+    .from("user_entitlements")
+    .select("telegram_id,premium_until", { count: "exact" })
+    .eq("is_premium", true)
+    .order("premium_until", { ascending: true, nullsFirst: false })
+    .range(from, from + opts.pageSize - 1);
+  const ents = (data ?? []) as { telegram_id: number; premium_until: string | null }[];
+  if (!ents.length) return { rows: [], total: count ?? 0 };
+  const ids = ents.map((e) => Number(e.telegram_id));
+  const { data: users } = await admin().from("bot_users").select(USER_COLS).in("telegram_id", ids);
+  const byId = new Map<number, BotUserRow>(
+    (((users ?? []) as any) as BotUserRow[]).map((u) => [Number(u.telegram_id), u]),
+  );
+  const rows = ents.map((e) => {
+    const u = byId.get(Number(e.telegram_id));
+    return {
+      telegram_id: Number(e.telegram_id),
+      username: u?.username ?? null,
+      first_name: u?.first_name ?? null,
+      last_name: u?.last_name ?? null,
+      is_blocked: u?.is_blocked ?? false,
+      first_seen: u?.first_seen ?? "",
+      last_seen: u?.last_seen ?? "",
+      premium_until: e.premium_until,
+    };
+  });
+  return { rows, total: count ?? 0 };
+}
+
 export async function listUsersPaged(opts: {
   page: number;
   pageSize: number;

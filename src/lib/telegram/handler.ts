@@ -1739,6 +1739,29 @@ async function handleAdminCallback(cq: any, data: string) {
       "🔎 שלח שם משתמש (עם או בלי @), שם, או ID לחיפוש לניהול פרימיום.\nשלח /cancel לביטול.",
     ).then(() => {}).catch(() => {});
   }
+  if (data.startsWith("admin_premlist:")) {
+    const page = Math.max(0, Number(data.split(":")[1]) || 0);
+    return await renderPremiumMembers(chatId, messageId, page);
+  }
+  if (data.startsWith("admin_dm_")) {
+    const tid = Number(data.slice("admin_dm_".length));
+    if (Number.isFinite(tid)) {
+      await setAdminState(userId, `awaiting_dm:${tid}`);
+      const u = await getBotUser(tid).catch(() => null);
+      return await sendMessage(
+        chatId,
+        `✉️ שלח את ההודעה שתישלח אל <b>${u ? escapeHtml(displayUserName(u)) : tid}</b> (<code>${tid}</code>).\n` +
+          `המשתמש יראה אותה עם הכותרת «📩 הודעה מהאדמין».\nשלח /cancel לביטול.`,
+      ).then(() => {}).catch(() => {});
+    }
+  }
+  if (data === "__never_admin_prem_search") {
+    await setAdminState(userId, "awaiting_prem_search");
+    return await sendMessage(
+      chatId,
+      "🔎 שלח שם משתמש (עם או בלי @), שם, או ID לחיפוש לניהול פרימיום.\nשלח /cancel לביטול.",
+    ).then(() => {}).catch(() => {});
+  }
   if (data.startsWith("admin_premu_")) {
     const tid = Number(data.slice("admin_premu_".length));
     if (Number.isFinite(tid)) return await renderPremiumUser(chatId, messageId, tid);

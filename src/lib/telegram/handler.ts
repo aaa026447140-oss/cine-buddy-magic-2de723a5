@@ -21,6 +21,7 @@ import {
   createBroadcastJob,
   listRequiredChannels,
   listUsersPaged,
+  listPremiumMembersPaged,
   removeRequiredChannel,
   MAX_PERMANENT_REQUIRED,
   MAX_TEMPORARY_REQUIRED,

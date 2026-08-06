@@ -22,6 +22,8 @@ import {
   listRequiredChannels,
   listUsersPaged,
   listPremiumMembersPaged,
+  listStarSupportersPaged,
+  userStarPayments,
   removeRequiredChannel,
   MAX_PERMANENT_REQUIRED,
   MAX_TEMPORARY_REQUIRED,
@@ -1725,6 +1727,14 @@ async function handleAdminCallback(cq: any, data: string) {
   if (data === "admin_load") {
     return await renderServerLoad(chatId, messageId);
   }
+  if (data.startsWith("admin_sup:")) {
+    const page = Math.max(0, Number(data.split(":")[1]) || 0);
+    return await renderStarSupporters(chatId, messageId, page);
+  }
+  if (data.startsWith("admin_supu_")) {
+    const tid = Number(data.slice("admin_supu_".length));
+    if (Number.isFinite(tid)) return await renderSupporterView(chatId, messageId, tid);
+  }
   if (data.startsWith("admin_prem:")) {
     const [, sort, pageText] = data.split(":");
     return await renderPremiumList(chatId, messageId, {
@@ -2433,6 +2443,81 @@ async function renderUnblockRequests(chatId: number, messageId: number) {
 }
 
 const PREMIUM_PAGE_SIZE = 8;
+const SUPPORTERS_PAGE_SIZE = 8;
+
+/** List of everyone who supported the bot with Telegram Stars. */
+async function renderStarSupporters(chatId: number, messageId: number, page: number) {
+  const { rows, total, totalStars } = await listStarSupportersPaged({
+    page,
+    pageSize: SUPPORTERS_PAGE_SIZE,
+  }).catch(() => ({ rows: [], total: 0, totalStars: 0 }) as any);
+  const totalPages = Math.max(1, Math.ceil(total / SUPPORTERS_PAGE_SIZE));
+  const kb: any[][] = [];
+  for (const r of rows) {
+    const u = await getBotUser(r.telegram_id).catch(() => null);
+    kb.push([
+      {
+        text: `⭐ ${r.stars.toLocaleString()} · ${truncateBtn(u ? displayUserName(u) : String(r.telegram_id), 30)}`,
+        callback_data: `admin_supu_${r.telegram_id}`,
+      },
+    ]);
+  }
+  const nav: any[] = [];
+  if (page > 0) nav.push({ text: "⬅️ הקודם", callback_data: `admin_sup:${page - 1}` });
+  nav.push({ text: `${page + 1}/${totalPages}`, callback_data: "noop" });
+  if (page < totalPages - 1) nav.push({ text: "הבא ➡️", callback_data: `admin_sup:${page + 1}` });
+  if (nav.length > 1) kb.push(nav);
+  kb.push([{ text: "🔄 רענן", callback_data: `admin_sup:${page}` }]);
+  kb.push([{ text: "« חזרה", callback_data: "admin_open" }]);
+  await editMessageText(
+    chatId,
+    messageId,
+    `⭐ <b>תומכים בכוכבי טלגרם</b>\n` +
+      `👥 תומכים: <b>${total.toLocaleString()}</b> · סה״כ כוכבים: <b>${totalStars.toLocaleString()}</b>\n` +
+      `עמוד ${page + 1}/${totalPages}\n\n` +
+      (rows.length ? "לחץ על תומך כדי לראות את כל הפרטים עליו." : "<i>אין עדיין תומכים.</i>"),
+    { reply_markup: { inline_keyboard: kb } },
+  ).catch(() => {});
+}
+
+/** Full profile of a single supporter, including his payment history. */
+async function renderSupporterView(chatId: number, messageId: number, telegramId: number) {
+  const u = await getBotUser(telegramId).catch(() => null);
+  const ent = await getEntitlements(telegramId).catch(() => null);
+  const stars = await userStars(telegramId).catch(() => 0);
+  const pays = await userStarPayments(telegramId, 10).catch(() => []);
+  const recent = await lastSearches(telegramId, 1).catch(() => []);
+  const name = u ? escapeHtml(displayUserName(u)) : String(telegramId);
+  const full = u ? [u.first_name, u.last_name].filter(Boolean).join(" ").trim() : "";
+  const text =
+    `⭐ <b>${name}</b>\n\n` +
+    `🆔 ID: <code>${telegramId}</code> <i>(נגיעה מעתיקה)</i>\n` +
+    (u?.username ? `📛 שם משתמש: @${escapeHtml(u.username)}\n` : "") +
+    (full ? `🧾 שם מלא: ${escapeHtml(full)}\n` : "") +
+    ((u as any)?.language_code ? `🌐 שפה: ${escapeHtml(String((u as any).language_code))}\n` : "") +
+    (u ? `📅 הצטרף: ${new Date(u.first_seen).toLocaleString("he-IL")}\n` : "") +
+    (u ? `🕓 נראה לאחרונה: ${new Date(u.last_seen).toLocaleString("he-IL")}\n` : "") +
+    `⭐ סה״כ תרומות: <b>${stars.toLocaleString()}</b> כוכבים · <b>${pays.length}</b> תשלומים אחרונים\n` +
+    `💎 פרימיום: <b>${ent?.is_premium ? "פעיל" : "לא פעיל"}</b>` +
+    (ent?.is_premium && ent.premium_until ? ` · עד ${fmtDay(ent.premium_until)}` : "") +
+    `\n🎁 בונוס יומי: <b>${ent?.bonus_daily ?? 0}</b> · ⚡ חיפושים חד־פעמיים: <b>${ent?.extra_credits ?? 0}</b>\n` +
+    `🔍 חיפוש אחרון: ${recent[0] ? `<code>${escapeHtml(recent[0].query)}</code> · ${formatWhen(recent[0].created_at)}` : "—"}\n` +
+    `סטטוס: ${u?.is_blocked ? "🚫 חסום" : "✅ פעיל"}\n\n` +
+    `<b>היסטוריית תשלומים:</b>\n` +
+    (pays.length
+      ? pays.map((p) => `• ${p.stars_amount} ⭐ · ${formatWhen(p.created_at)}`).join("\n")
+      : "<i>אין תשלומים.</i>");
+  await editMessageText(chatId, messageId, text, {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "✉️ שלח הודעה למשתמש", callback_data: `admin_dm_${telegramId}` }],
+        [{ text: "📜 היסטוריית חיפושים", callback_data: `admin_uhist_${telegramId}` }],
+        [{ text: "💎 ניהול פרימיום", callback_data: `admin_premu_${telegramId}` }],
+        [{ text: "« חזרה לרשימה", callback_data: "admin_sup:0" }],
+      ],
+    },
+  }).catch(() => {});
+}
 
 function fmtDay(iso?: string | null) {
   return iso

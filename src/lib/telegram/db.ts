@@ -310,6 +310,49 @@ export async function userStars(telegram_id: number): Promise<number> {
   return (data ?? []).reduce((s: number, p: any) => s + (p.stars_amount || 0), 0);
 }
 
+export type StarSupporter = {
+  telegram_id: number;
+  stars: number;
+  payments: number;
+  last_at: string;
+};
+
+/** Aggregated Telegram Stars supporters, biggest first. */
+export async function listStarSupportersPaged(opts: { page: number; pageSize: number }) {
+  const { data } = await admin()
+    .from("star_payments")
+    .select("telegram_user_id,stars_amount,created_at")
+    .order("created_at", { ascending: false })
+    .limit(5000);
+  const map = new Map<number, StarSupporter>();
+  for (const p of (data ?? []) as any[]) {
+    const id = Number(p.telegram_user_id);
+    const cur = map.get(id) || { telegram_id: id, stars: 0, payments: 0, last_at: p.created_at };
+    cur.stars += Number(p.stars_amount || 0);
+    cur.payments += 1;
+    if (new Date(p.created_at) > new Date(cur.last_at)) cur.last_at = p.created_at;
+    map.set(id, cur);
+  }
+  const all = [...map.values()].sort((a, b) => b.stars - a.stars);
+  const start = opts.page * opts.pageSize;
+  return {
+    rows: all.slice(start, start + opts.pageSize),
+    total: all.length,
+    totalStars: all.reduce((s, r) => s + r.stars, 0),
+  };
+}
+
+/** Latest individual star payments of one user. */
+export async function userStarPayments(telegram_id: number, limit = 10) {
+  const { data } = await admin()
+    .from("star_payments")
+    .select("stars_amount,created_at,payload")
+    .eq("telegram_user_id", telegram_id)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  return ((data ?? []) as any[]) as { stars_amount: number; created_at: string; payload: string | null }[];
+}
+
 export async function indexMovie(m: {
   source_channel_id: number;
   message_id: number;

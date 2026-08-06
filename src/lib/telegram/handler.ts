@@ -22,6 +22,8 @@ import {
   listRequiredChannels,
   listUsersPaged,
   listPremiumMembersPaged,
+  listStarSupportersPaged,
+  userStarPayments,
   removeRequiredChannel,
   MAX_PERMANENT_REQUIRED,
   MAX_TEMPORARY_REQUIRED,

@@ -462,7 +462,7 @@ async function requireSubscriptionOrPrompt(
 // ───── Main entry ─────
 export async function handleUpdate(update: any) {
   try {
-    syncBotCommands().catch(() => {});
+    await syncBotCommands().catch(() => {});
     if (update.message) return await handleMessage(update.message);
     if (update.edited_message) return; // ignore edits
     if (update.channel_post) return await handleChannelPost(update.channel_post);

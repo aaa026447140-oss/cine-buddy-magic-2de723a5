@@ -691,6 +691,12 @@ async function handleMessage(msg: any) {
     if (payload === "quota") {
       return await sendQuotaMenu(chat.id, Number(from.id));
     }
+    if (payload.startsWith("buy_")) {
+      const kind = payload.slice(4) as "single" | "daily" | "premium";
+      if (kind === "single" || kind === "daily" || kind === "premium") {
+        return await sendPurchaseInvoice(chat.id, Number(from.id), kind);
+      }
+    }
     return await sendStartMenu(chat.id, Number(from.id));
   }
 
@@ -698,7 +704,14 @@ async function handleMessage(msg: any) {
     return await sendStats(chat.id, Number(from.id));
   }
 
-  if (text === "/admin" && (await isAdmin(from.id))) {
+  {
+    const cmd = parseCommand(text);
+    const kind = PURCHASE_KINDS[cmd];
+    if (kind) return await sendPurchaseInvoice(chat.id, Number(from.id), kind);
+    if (cmd === "quota") return await sendQuotaMenu(chat.id, Number(from.id));
+  }
+
+  if (parseCommand(text) === "admin" && (await isAdmin(from.id))) {
     return await sendAdminPanel(chat.id, Number(from.id));
   }
 

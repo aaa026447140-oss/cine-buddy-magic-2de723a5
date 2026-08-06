@@ -12,6 +12,7 @@ import {
   tg,
 } from "./api";
 import { ADMIN_ID, PAGE_SIZE, STAR_AMOUNTS } from "./constants";
+import { parseCommand, syncBotCommands } from "./commands";
 import { formatDuration, formatWhen, isInappropriateQuery, matchesBlockedWords } from "./moderation";
 import {
   addAdmin,
@@ -461,6 +462,7 @@ async function requireSubscriptionOrPrompt(
 // ───── Main entry ─────
 export async function handleUpdate(update: any) {
   try {
+    syncBotCommands().catch(() => {});
     if (update.message) return await handleMessage(update.message);
     if (update.edited_message) return; // ignore edits
     if (update.channel_post) return await handleChannelPost(update.channel_post);

@@ -1727,6 +1727,14 @@ async function handleAdminCallback(cq: any, data: string) {
   if (data === "admin_load") {
     return await renderServerLoad(chatId, messageId);
   }
+  if (data.startsWith("admin_sup:")) {
+    const page = Math.max(0, Number(data.split(":")[1]) || 0);
+    return await renderStarSupporters(chatId, messageId, page);
+  }
+  if (data.startsWith("admin_supu_")) {
+    const tid = Number(data.slice("admin_supu_".length));
+    if (Number.isFinite(tid)) return await renderSupporterView(chatId, messageId, tid);
+  }
   if (data.startsWith("admin_prem:")) {
     const [, sort, pageText] = data.split(":");
     return await renderPremiumList(chatId, messageId, {

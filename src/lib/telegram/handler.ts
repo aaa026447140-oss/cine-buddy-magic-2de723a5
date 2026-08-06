@@ -12,6 +12,7 @@ import {
   tg,
 } from "./api";
 import { ADMIN_ID, PAGE_SIZE, STAR_AMOUNTS } from "./constants";
+import { parseCommand, syncBotCommands } from "./commands";
 import { formatDuration, formatWhen, isInappropriateQuery, matchesBlockedWords } from "./moderation";
 import {
   addAdmin,
@@ -461,6 +462,7 @@ async function requireSubscriptionOrPrompt(
 // ───── Main entry ─────
 export async function handleUpdate(update: any) {
   try {
+    await syncBotCommands().catch(() => {});
     if (update.message) return await handleMessage(update.message);
     if (update.edited_message) return; // ignore edits
     if (update.channel_post) return await handleChannelPost(update.channel_post);
@@ -525,7 +527,19 @@ async function handleMessage(msg: any) {
     if (msg.text) {
       // Treat any text starting with "?" or any text that isn't a command as a search.
       const text = msg.text.trim();
-      if (text.startsWith("/")) return; // ignore commands in groups
+      if (text.startsWith("/")) {
+        // Public commands work inside groups too (menu + purchase shortcuts).
+        const cmd = parseCommand(text);
+        if (cmd === "start") {
+          await sendStartMenu(chat.id, Number(from.id)).catch(() => {});
+          return;
+        }
+        if (cmd === "premium" || cmd === "search" || cmd === "daily" || cmd === "quota") {
+          await sendGroupPurchasePrompt(chat.id, cmd).catch(() => {});
+          return;
+        }
+        return; // other commands stay private-only
+      }
       if (text.length < 2) return;
       // Blocked user in a group: silently ignore search attempts, but notify them.
       const bu = await getBotUser(Number(from.id)).catch(() => null);
@@ -677,6 +691,12 @@ async function handleMessage(msg: any) {
     if (payload === "quota") {
       return await sendQuotaMenu(chat.id, Number(from.id));
     }
+    if (payload.startsWith("buy_")) {
+      const kind = payload.slice(4) as "single" | "daily" | "premium";
+      if (kind === "single" || kind === "daily" || kind === "premium") {
+        return await sendPurchaseInvoice(chat.id, Number(from.id), kind);
+      }
+    }
     return await sendStartMenu(chat.id, Number(from.id));
   }
 
@@ -684,7 +704,14 @@ async function handleMessage(msg: any) {
     return await sendStats(chat.id, Number(from.id));
   }
 
-  if (text === "/admin" && (await isAdmin(from.id))) {
+  {
+    const cmd = parseCommand(text);
+    const kind = PURCHASE_KINDS[cmd];
+    if (kind) return await sendPurchaseInvoice(chat.id, Number(from.id), kind);
+    if (cmd === "quota") return await sendQuotaMenu(chat.id, Number(from.id));
+  }
+
+  if (parseCommand(text) === "admin" && (await isAdmin(from.id))) {
     return await sendAdminPanel(chat.id, Number(from.id));
   }
 
@@ -896,6 +923,53 @@ async function buildStartView(userId: number) {
 async function sendStartMenu(chatId: number, userId: number) {
   const v = await buildStartView(userId);
   await sendMessage(chatId, v.text, { reply_markup: v.reply_markup });
+}
+
+const PURCHASE_KINDS: Record<string, "single" | "daily" | "premium"> = {
+  premium: "premium",
+  search: "single",
+  single: "single",
+  daily: "daily",
+};
+
+/** Stars invoices only work in private chats — from a group we deep-link there. */
+async function sendGroupPurchasePrompt(chatId: number, cmd: string) {
+  const me = await getMe();
+  const kind = PURCHASE_KINDS[cmd];
+  const labels: Record<string, string> = {
+    premium: "💎 פרימיום לחודש — ללא הגבלה",
+    single: "⚡ חיפוש נוסף חד־פעמי",
+    daily: "📅 +1 חיפוש בכל יום",
+  };
+  const payload = kind ? `buy_${kind}` : "quota";
+  const label = kind ? labels[kind] : "🎟️ החיפושים שלי";
+  await sendMessage(chatId, `${label}\n\nהתשלום מתבצע בצ׳אט הפרטי עם הבוט 👇`, {
+    reply_markup: {
+      inline_keyboard: [[{ text: "המשך בצ׳אט הפרטי", url: `https://t.me/${me.username}?start=${payload}` }]],
+    },
+  });
+}
+
+async function sendPurchaseInvoice(chatId: number, userId: number, kind: "single" | "daily" | "premium") {
+  const s = await getSettings();
+  const map: Record<string, { amount: number; title: string; desc: string }> = {
+    single: { amount: s.price_single_search, title: "חיפוש נוסף חד־פעמי", desc: "חיפוש אחד נוסף מעבר למכסה היומית." },
+    daily: { amount: s.price_daily_extra, title: "+1 חיפוש בכל יום", desc: "תוספת קבועה של חיפוש אחד בכל יום, לתמיד." },
+    premium: { amount: s.price_premium, title: "פרימיום לחודש — ללא הגבלה", desc: "חיפושים ללא הגבלה למשך 30 ימים." },
+  };
+  const item = map[kind];
+  if (!item || !(item.amount > 0)) return;
+  await sendInvoice({
+    chat_id: chatId,
+    title: item.title,
+    description: item.desc,
+    payload: `buy:${kind}:${userId}:${Date.now()}`,
+    currency: "XTR",
+    prices: [{ label: `${item.amount} Stars`, amount: item.amount }],
+  }).catch((e: any) => {
+    console.error("sendInvoice failed:", e?.message);
+    sendMessage(chatId, "❌ לא הצלחתי לפתוח חלון תשלום. נסה שוב מאוחר יותר.");
+  });
 }
 
 async function sendAdminPanel(chatId: number, userId?: number) {

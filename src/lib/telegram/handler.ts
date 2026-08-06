@@ -912,6 +912,53 @@ async function sendStartMenu(chatId: number, userId: number) {
   await sendMessage(chatId, v.text, { reply_markup: v.reply_markup });
 }
 
+const PURCHASE_KINDS: Record<string, "single" | "daily" | "premium"> = {
+  premium: "premium",
+  search: "single",
+  single: "single",
+  daily: "daily",
+};
+
+/** Stars invoices only work in private chats — from a group we deep-link there. */
+async function sendGroupPurchasePrompt(chatId: number, cmd: string) {
+  const me = await getMe();
+  const kind = PURCHASE_KINDS[cmd];
+  const labels: Record<string, string> = {
+    premium: "💎 פרימיום לחודש — ללא הגבלה",
+    single: "⚡ חיפוש נוסף חד־פעמי",
+    daily: "📅 +1 חיפוש בכל יום",
+  };
+  const payload = kind ? `buy_${kind}` : "quota";
+  const label = kind ? labels[kind] : "🎟️ החיפושים שלי";
+  await sendMessage(chatId, `${label}\n\nהתשלום מתבצע בצ׳אט הפרטי עם הבוט 👇`, {
+    reply_markup: {
+      inline_keyboard: [[{ text: "המשך בצ׳אט הפרטי", url: `https://t.me/${me.username}?start=${payload}` }]],
+    },
+  });
+}
+
+async function sendPurchaseInvoice(chatId: number, userId: number, kind: "single" | "daily" | "premium") {
+  const s = await getSettings();
+  const map: Record<string, { amount: number; title: string; desc: string }> = {
+    single: { amount: s.price_single_search, title: "חיפוש נוסף חד־פעמי", desc: "חיפוש אחד נוסף מעבר למכסה היומית." },
+    daily: { amount: s.price_daily_extra, title: "+1 חיפוש בכל יום", desc: "תוספת קבועה של חיפוש אחד בכל יום, לתמיד." },
+    premium: { amount: s.price_premium, title: "פרימיום לחודש — ללא הגבלה", desc: "חיפושים ללא הגבלה למשך 30 ימים." },
+  };
+  const item = map[kind];
+  if (!item || !(item.amount > 0)) return;
+  await sendInvoice({
+    chat_id: chatId,
+    title: item.title,
+    description: item.desc,
+    payload: `buy:${kind}:${userId}:${Date.now()}`,
+    currency: "XTR",
+    prices: [{ label: `${item.amount} Stars`, amount: item.amount }],
+  }).catch((e: any) => {
+    console.error("sendInvoice failed:", e?.message);
+    sendMessage(chatId, "❌ לא הצלחתי לפתוח חלון תשלום. נסה שוב מאוחר יותר.");
+  });
+}
+
 async function sendAdminPanel(chatId: number, userId?: number) {
   const s = await stats();
   const main = isMainAdmin(userId);

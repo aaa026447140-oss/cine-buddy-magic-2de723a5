@@ -166,6 +166,7 @@ export function adminPanelKeyboard(isMain: boolean) {
     rows.push([{ text: "📮 הגדרת קבוצת פניות", callback_data: "admin_support_group" }]);
   }
   rows.push([{ text: "🎟️ ניהול חיפושים ומחירים", callback_data: "admin_quota" }]);
+  rows.push([{ text: "⭐ תומכים בכוכבים", callback_data: "admin_sup:0" }]);
   rows.push([{ text: "📊 סטטיסטיקות", callback_data: "admin_stats" }]);
   rows.push([
     { text: "🚫 מילים חסומות", callback_data: "admin_words" },

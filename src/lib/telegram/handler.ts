@@ -2494,7 +2494,7 @@ async function renderSupporterView(chatId: number, messageId: number, telegramId
     `🆔 ID: <code>${telegramId}</code> <i>(נגיעה מעתיקה)</i>\n` +
     (u?.username ? `📛 שם משתמש: @${escapeHtml(u.username)}\n` : "") +
     (full ? `🧾 שם מלא: ${escapeHtml(full)}\n` : "") +
-    (u?.language_code ? `🌐 שפה: ${escapeHtml(u.language_code)}\n` : "") +
+    ((u as any)?.language_code ? `🌐 שפה: ${escapeHtml(String((u as any).language_code))}\n` : "") +
     (u ? `📅 הצטרף: ${new Date(u.first_seen).toLocaleString("he-IL")}\n` : "") +
     (u ? `🕓 נראה לאחרונה: ${new Date(u.last_seen).toLocaleString("he-IL")}\n` : "") +
     `⭐ סה״כ תרומות: <b>${stars.toLocaleString()}</b> כוכבים · <b>${pays.length}</b> תשלומים אחרונים\n` +

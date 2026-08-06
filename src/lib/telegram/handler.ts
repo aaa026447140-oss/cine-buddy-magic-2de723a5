@@ -527,7 +527,19 @@ async function handleMessage(msg: any) {
     if (msg.text) {
       // Treat any text starting with "?" or any text that isn't a command as a search.
       const text = msg.text.trim();
-      if (text.startsWith("/")) return; // ignore commands in groups
+      if (text.startsWith("/")) {
+        // Public commands work inside groups too (menu + purchase shortcuts).
+        const cmd = parseCommand(text);
+        if (cmd === "start") {
+          await sendStartMenu(chat.id, Number(from.id)).catch(() => {});
+          return;
+        }
+        if (cmd === "premium" || cmd === "search" || cmd === "daily" || cmd === "quota") {
+          await sendGroupPurchasePrompt(chat.id, cmd).catch(() => {});
+          return;
+        }
+        return; // other commands stay private-only
+      }
       if (text.length < 2) return;
       // Blocked user in a group: silently ignore search attempts, but notify them.
       const bu = await getBotUser(Number(from.id)).catch(() => null);

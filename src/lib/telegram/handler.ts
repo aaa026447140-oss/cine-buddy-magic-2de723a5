@@ -2064,14 +2064,15 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
     }
     await setAdminState(userId, null);
     {
-      const field =
-        st.state === "admin_q_free"
-          ? "free_searches_per_day"
-          : st.state === "admin_q_p_single"
-            ? "price_single_search"
-            : st.state === "admin_q_p_daily"
-              ? "price_daily_extra"
-              : "price_premium";
+      const fields: Record<string, string> = {
+        admin_q_free: "free_searches_per_day",
+        admin_q_p_single: "price_single_search",
+        admin_q_p_daily: "price_daily_extra",
+        admin_q_p_premium: "price_premium",
+        admin_q_p_year: "price_premium_year",
+        admin_q_p_forever: "price_premium_forever",
+      };
+      const field = fields[st.state] || "price_premium";
       await updateSettings({ [field]: Math.max(0, n) } as any);
       await sendMessage(chatId, "✅ עודכן.");
     }

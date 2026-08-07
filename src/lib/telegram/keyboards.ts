@@ -48,22 +48,44 @@ export function quotaMenuKeyboard(
   ]);
   rows.push([{ text: "📋 העתק את קישור ההזמנה שלי", callback_data: "quota_link" }]);
   if (!isPremium) {
-    rows.push([{ text: `⚡ חיפוש נוסף חד־פעמי · ${s.price_single_search} ⭐`, callback_data: "buy_single" }]);
-    rows.push([{ text: `📅 +1 חיפוש כל יום · ${s.price_daily_extra} ⭐`, callback_data: "buy_daily" }]);
-    rows.push([{ text: `💎 פרימיום לחודש — ללא הגבלה · ${s.price_premium} ⭐`, callback_data: "buy_premium" }]);
+    if (s.enable_single) rows.push([{ text: `⚡ חיפוש נוסף חד־פעמי · ${s.price_single_search} ⭐`, callback_data: "buy_single" }]);
+    if (s.enable_daily) rows.push([{ text: `📅 +1 חיפוש כל יום · ${s.price_daily_extra} ⭐`, callback_data: "buy_daily" }]);
+    if (s.enable_premium) rows.push([{ text: `💎 פרימיום לחודש — ללא הגבלה · ${s.price_premium} ⭐`, callback_data: "buy_premium" }]);
+    if (s.enable_premium_year)
+      rows.push([{ text: `🏆 פרימיום לשנה — ללא הגבלה · ${s.price_premium_year} ⭐`, callback_data: "buy_premium_year" }]);
+    if (s.enable_premium_forever)
+      rows.push([{ text: `♾️ פרימיום לנצח — ללא הגבלה · ${s.price_premium_forever} ⭐`, callback_data: "buy_premium_forever" }]);
   }
   rows.push([{ text: "« חזרה", callback_data: "back_to_start" }]);
   return { inline_keyboard: rows };
 }
 
 export function quotaAdminKeyboard(s: BotSettings) {
+  const sw = (on: boolean) => (on ? "🟢" : "🔴");
   return {
     inline_keyboard: [
       [{ text: s.quota_enabled ? "🟢 מערכת חיפושים: פעילה (כבה)" : "🔴 מערכת חיפושים: כבויה (הפעל)", callback_data: "admin_q_toggle" }],
       [{ text: `🔢 חיפושים חינם ליום: ${s.free_searches_per_day}`, callback_data: "admin_q_free" }],
-      [{ text: `⚡ מחיר חיפוש חד־פעמי: ${s.price_single_search} ⭐`, callback_data: "admin_q_p_single" }],
-      [{ text: `📅 מחיר חיפוש יומי קבוע: ${s.price_daily_extra} ⭐`, callback_data: "admin_q_p_daily" }],
-      [{ text: `💎 מחיר פרימיום: ${s.price_premium} ⭐`, callback_data: "admin_q_p_premium" }],
+      [
+        { text: `⚡ חד־פעמי: ${s.price_single_search} ⭐`, callback_data: "admin_q_p_single" },
+        { text: sw(s.enable_single), callback_data: "admin_q_t_single" },
+      ],
+      [
+        { text: `📅 יומי קבוע: ${s.price_daily_extra} ⭐`, callback_data: "admin_q_p_daily" },
+        { text: sw(s.enable_daily), callback_data: "admin_q_t_daily" },
+      ],
+      [
+        { text: `💎 פרימיום לחודש: ${s.price_premium} ⭐`, callback_data: "admin_q_p_premium" },
+        { text: sw(s.enable_premium), callback_data: "admin_q_t_premium" },
+      ],
+      [
+        { text: `🏆 פרימיום לשנה: ${s.price_premium_year} ⭐`, callback_data: "admin_q_p_year" },
+        { text: sw(s.enable_premium_year), callback_data: "admin_q_t_year" },
+      ],
+      [
+        { text: `♾️ פרימיום לנצח: ${s.price_premium_forever} ⭐`, callback_data: "admin_q_p_forever" },
+        { text: sw(s.enable_premium_forever), callback_data: "admin_q_t_forever" },
+      ],
       [{ text: "💎 ניהול פרימיום למשתמשים", callback_data: "admin_prem:recent:0" }],
       [{ text: "♻️ אפס את המכסה היומית לכולם", callback_data: "admin_q_reset" }],
       [{ text: "« חזרה", callback_data: "admin_open" }],

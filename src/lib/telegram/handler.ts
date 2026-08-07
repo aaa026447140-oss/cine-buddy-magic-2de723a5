@@ -925,8 +925,50 @@ async function sendStartMenu(chatId: number, userId: number) {
   await sendMessage(chatId, v.text, { reply_markup: v.reply_markup });
 }
 
-const PURCHASE_KINDS: Record<string, "single" | "daily" | "premium"> = {
+export type BuyKind = "single" | "daily" | "premium" | "premium_year" | "premium_forever";
+
+/** Prices, labels and on/off state for every purchasable item. */
+function purchaseCatalog(s: BotSettings): Record<BuyKind, { amount: number; title: string; desc: string; enabled: boolean }> {
+  return {
+    single: {
+      amount: s.price_single_search,
+      title: "חיפוש נוסף חד־פעמי",
+      desc: "חיפוש אחד נוסף מעבר למכסה היומית.",
+      enabled: !!s.enable_single,
+    },
+    daily: {
+      amount: s.price_daily_extra,
+      title: "+1 חיפוש בכל יום",
+      desc: "תוספת קבועה של חיפוש אחד בכל יום, לתמיד.",
+      enabled: !!s.enable_daily,
+    },
+    premium: {
+      amount: s.price_premium,
+      title: "פרימיום לחודש — ללא הגבלה",
+      desc: "חיפושים ללא הגבלה למשך 30 ימים.",
+      enabled: !!s.enable_premium,
+    },
+    premium_year: {
+      amount: s.price_premium_year,
+      title: "פרימיום לשנה — ללא הגבלה",
+      desc: "חיפושים ללא הגבלה למשך 365 ימים.",
+      enabled: !!s.enable_premium_year,
+    },
+    premium_forever: {
+      amount: s.price_premium_forever,
+      title: "פרימיום לנצח — ללא הגבלה",
+      desc: "חיפושים ללא הגבלה, ללא תאריך סיום.",
+      enabled: !!s.enable_premium_forever,
+    },
+  };
+}
+
+const PURCHASE_KINDS: Record<string, BuyKind> = {
   premium: "premium",
+  year: "premium_year",
+  premium_year: "premium_year",
+  forever: "premium_forever",
+  premium_forever: "premium_forever",
   search: "single",
   single: "single",
   daily: "daily",

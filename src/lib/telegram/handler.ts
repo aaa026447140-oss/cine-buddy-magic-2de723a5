@@ -1295,28 +1295,9 @@ async function handleCallback(cq: any) {
     return;
   }
 
-  if (data === "buy_single" || data === "buy_daily" || data === "buy_premium") {
+  if (data.startsWith("buy_") && PURCHASE_KINDS[data.slice(4)]) {
     await answerCallbackQuery(cq.id);
-    const s = await getSettings();
-    const kind = data.slice(4);
-    const map: Record<string, { amount: number; title: string; desc: string }> = {
-      single: { amount: s.price_single_search, title: "חיפוש נוסף חד־פעמי", desc: "חיפוש אחד נוסף מעבר למכסה היומית." },
-      daily: { amount: s.price_daily_extra, title: "+1 חיפוש בכל יום", desc: "תוספת קבועה של חיפוש אחד בכל יום, לתמיד." },
-      premium: { amount: s.price_premium, title: "פרימיום לחודש — ללא הגבלה", desc: "חיפושים ללא הגבלה למשך 30 ימים." },
-    };
-    const item = map[kind];
-    if (!item || !(item.amount > 0)) return;
-    await sendInvoice({
-      chat_id: chatId,
-      title: item.title,
-      description: item.desc,
-      payload: `buy:${kind}:${from.id}:${Date.now()}`,
-      currency: "XTR",
-      prices: [{ label: `${item.amount} Stars`, amount: item.amount }],
-    }).catch((e: any) => {
-      console.error("sendInvoice failed:", e?.message);
-      sendMessage(chatId, "❌ לא הצלחתי לפתוח חלון תשלום. נסה שוב מאוחר יותר.");
-    });
+    await sendPurchaseInvoice(chatId, Number(from.id), PURCHASE_KINDS[data.slice(4)]!);
     return;
   }
 

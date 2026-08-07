@@ -1548,6 +1548,18 @@ async function handleAdminCallback(cq: any, data: string) {
       await updateSettings({ quota_enabled: !s.quota_enabled } as any);
       return await renderQuotaAdmin(chatId, messageId, await getSettings());
     }
+    const toggles: Record<string, keyof BotSettings> = {
+      admin_q_t_single: "enable_single",
+      admin_q_t_daily: "enable_daily",
+      admin_q_t_premium: "enable_premium",
+      admin_q_t_year: "enable_premium_year",
+      admin_q_t_forever: "enable_premium_forever",
+    };
+    if (toggles[data]) {
+      const field = toggles[data]!;
+      await updateSettings({ [field]: !s[field] } as any);
+      return await renderQuotaAdmin(chatId, messageId, await getSettings());
+    }
     if (data === "admin_q_reset") {
       await resetDailyQuotaForAll().catch(() => {});
       await sendMessage(
@@ -1561,6 +1573,8 @@ async function handleAdminCallback(cq: any, data: string) {
       admin_q_p_single: "⚡ שלח את המחיר בכוכבים לחיפוש נוסף חד־פעמי:",
       admin_q_p_daily: "📅 שלח את המחיר בכוכבים לתוספת קבועה של חיפוש בכל יום:",
       admin_q_p_premium: "💎 שלח את המחיר בכוכבים לפרימיום (ללא הגבלה):",
+      admin_q_p_year: "🏆 שלח את המחיר בכוכבים לפרימיום לשנה:",
+      admin_q_p_forever: "♾️ שלח את המחיר בכוכבים לפרימיום לנצח:",
     };
     if (prompts[data]) {
       await setAdminState(Number(userId), data);

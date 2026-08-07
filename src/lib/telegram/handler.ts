@@ -591,15 +591,18 @@ async function handleMessage(msg: any) {
       } else if (kind === "daily") {
         await addBonusDaily(Number(from.id), 1).catch(() => {});
         await sendMessage(chat.id, "📅 מעכשיו יש לך +1 חיפוש בכל יום, לתמיד. תודה! ❤️");
-      } else if (kind === "premium") {
-        await setPremium(Number(from.id), true).catch(() => {});
+      } else if (kind === "premium_forever") {
+        await setPremiumForever(Number(from.id)).catch(() => {});
+        await sendMessage(chat.id, "♾️ הפרימיום הופעל <b>לנצח</b>! חיפושים ללא הגבלה, ללא תאריך סיום. תודה! ❤️");
+      } else if (kind === "premium" || kind === "premium_year") {
+        await setPremium(Number(from.id), true, kind === "premium_year" ? 365 : 30).catch(() => {});
         const entP = await getEntitlements(Number(from.id)).catch(() => null);
         const untilTxt = entP?.premium_until
           ? new Date(entP.premium_until).toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" })
           : "";
         await sendMessage(
           chat.id,
-          `💎 הפרימיום הופעל לחודש! חיפושים ללא הגבלה${untilTxt ? ` עד <b>${untilTxt}</b>` : ""}. תודה! ❤️`,
+          `💎 הפרימיום הופעל ל${kind === "premium_year" ? "שנה" : "חודש"}! חיפושים ללא הגבלה${untilTxt ? ` עד <b>${untilTxt}</b>` : ""}. תודה! ❤️`,
         );
       }
       return;

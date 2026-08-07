@@ -978,13 +978,22 @@ const PURCHASE_KINDS: Record<string, BuyKind> = {
 async function sendGroupPurchasePrompt(chatId: number, cmd: string) {
   const me = await getMe();
   const kind = PURCHASE_KINDS[cmd];
-  const labels: Record<string, string> = {
+  const labels: Record<BuyKind, string> = {
     premium: "💎 פרימיום לחודש — ללא הגבלה",
+    premium_year: "🏆 פרימיום לשנה — ללא הגבלה",
+    premium_forever: "♾️ פרימיום לנצח — ללא הגבלה",
     single: "⚡ חיפוש נוסף חד־פעמי",
     daily: "📅 +1 חיפוש בכל יום",
   };
   const payload = kind ? `buy_${kind}` : "quota";
   const label = kind ? labels[kind] : "🎟️ החיפושים שלי";
+  if (kind) {
+    const s = await getSettings();
+    if (!purchaseCatalog(s)[kind].enabled) {
+      await sendMessage(chatId, "🚫 האפשרות הזו אינה זמינה כרגע.").catch(() => {});
+      return;
+    }
+  }
   await sendMessage(chatId, `${label}\n\nהתשלום מתבצע בצ׳אט הפרטי עם הבוט 👇`, {
     reply_markup: {
       inline_keyboard: [[{ text: "המשך בצ׳אט הפרטי", url: `https://t.me/${me.username}?start=${payload}` }]],

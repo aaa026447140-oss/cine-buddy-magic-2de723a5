@@ -316,9 +316,11 @@ function quotaText(q: QuotaInfo, s: BotSettings, botUsername: string, userId: nu
     `\n📣 <b>הזמן חברים</b> — כל משתמש חדש שיצטרף דרך הקישור שלך מוסיף לך <b>+1 חיפוש בכל יום</b>, לתמיד.\n` +
     `🔗 <code>https://t.me/${botUsername}?start=r_${userId}</code>\n\n` +
     `💫 אפשר גם לרכוש:\n` +
-    `• ⚡ חיפוש נוסף חד־פעמי — ${s.price_single_search} ⭐\n` +
-    `• 📅 +1 חיפוש בכל יום (לתמיד) — ${s.price_daily_extra} ⭐\n` +
-    `• 💎 פרימיום לחודש ללא הגבלה — ${s.price_premium} ⭐`
+    (s.enable_single ? `• ⚡ חיפוש נוסף חד־פעמי — ${s.price_single_search} ⭐\n` : "") +
+    (s.enable_daily ? `• 📅 +1 חיפוש בכל יום (לתמיד) — ${s.price_daily_extra} ⭐\n` : "") +
+    (s.enable_premium ? `• 💎 פרימיום לחודש ללא הגבלה — ${s.price_premium} ⭐\n` : "") +
+    (s.enable_premium_year ? `• 🏆 פרימיום לשנה ללא הגבלה — ${s.price_premium_year} ⭐\n` : "") +
+    (s.enable_premium_forever ? `• ♾️ פרימיום לנצח ללא הגבלה — ${s.price_premium_forever} ⭐\n` : "")
   );
 }
 
@@ -340,9 +342,11 @@ function quotaAdminText(s: BotSettings): string {
     `🎟️ <b>ניהול חיפושים ומחירים</b>\n\n` +
     `מצב: <b>${s.quota_enabled ? "מוגבל (מכסה יומית)" : "חופשי — ללא הגבלה"}</b>\n` +
     `🔢 חיפושים חינם ליום: <b>${s.free_searches_per_day}</b>\n` +
-    `⚡ חיפוש חד־פעמי: <b>${s.price_single_search}</b> ⭐\n` +
-    `📅 +1 חיפוש בכל יום: <b>${s.price_daily_extra}</b> ⭐\n` +
-    `💎 פרימיום ללא הגבלה: <b>${s.price_premium}</b> ⭐\n\n` +
+    `⚡ חיפוש חד־פעמי: <b>${s.price_single_search}</b> ⭐ ${s.enable_single ? "🟢" : "🔴"}\n` +
+    `📅 +1 חיפוש בכל יום: <b>${s.price_daily_extra}</b> ⭐ ${s.enable_daily ? "🟢" : "🔴"}\n` +
+    `💎 פרימיום לחודש: <b>${s.price_premium}</b> ⭐ ${s.enable_premium ? "🟢" : "🔴"}\n` +
+    `🏆 פרימיום לשנה: <b>${s.price_premium_year}</b> ⭐ ${s.enable_premium_year ? "🟢" : "🔴"}\n` +
+    `♾️ פרימיום לנצח: <b>${s.price_premium_forever}</b> ⭐ ${s.enable_premium_forever ? "🟢" : "🔴"}\n\n` +
     `🎁 כל משתמש חדש שמצטרף דרך קישור ההזמנה מוסיף למזמין +1 חיפוש בכל יום.`
   );
 }

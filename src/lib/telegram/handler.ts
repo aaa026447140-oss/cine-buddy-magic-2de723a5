@@ -950,15 +950,15 @@ async function sendGroupPurchasePrompt(chatId: number, cmd: string) {
   });
 }
 
-async function sendPurchaseInvoice(chatId: number, userId: number, kind: "single" | "daily" | "premium") {
+async function sendPurchaseInvoice(chatId: number, userId: number, kind: BuyKind) {
   const s = await getSettings();
-  const map: Record<string, { amount: number; title: string; desc: string }> = {
-    single: { amount: s.price_single_search, title: "חיפוש נוסף חד־פעמי", desc: "חיפוש אחד נוסף מעבר למכסה היומית." },
-    daily: { amount: s.price_daily_extra, title: "+1 חיפוש בכל יום", desc: "תוספת קבועה של חיפוש אחד בכל יום, לתמיד." },
-    premium: { amount: s.price_premium, title: "פרימיום לחודש — ללא הגבלה", desc: "חיפושים ללא הגבלה למשך 30 ימים." },
-  };
-  const item = map[kind];
-  if (!item || !(item.amount > 0)) return;
+  const item = purchaseCatalog(s)[kind];
+  if (!item) return;
+  if (!item.enabled) {
+    await sendMessage(chatId, "🚫 האפשרות הזו אינה זמינה כרגע.").catch(() => {});
+    return;
+  }
+  if (!(item.amount > 0)) return;
   await sendInvoice({
     chat_id: chatId,
     title: item.title,

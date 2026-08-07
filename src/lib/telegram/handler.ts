@@ -692,10 +692,8 @@ async function handleMessage(msg: any) {
       return await sendQuotaMenu(chat.id, Number(from.id));
     }
     if (payload.startsWith("buy_")) {
-      const kind = payload.slice(4) as "single" | "daily" | "premium";
-      if (kind === "single" || kind === "daily" || kind === "premium") {
-        return await sendPurchaseInvoice(chat.id, Number(from.id), kind);
-      }
+      const kind = PURCHASE_KINDS[payload.slice(4)];
+      if (kind) return await sendPurchaseInvoice(chat.id, Number(from.id), kind);
     }
     return await sendStartMenu(chat.id, Number(from.id));
   }

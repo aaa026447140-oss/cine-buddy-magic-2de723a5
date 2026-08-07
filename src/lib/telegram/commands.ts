@@ -5,6 +5,8 @@ import { ADMIN_ID } from "./constants";
 const PUBLIC_COMMANDS = [
   { command: "start", description: "🎬 תפריט הבוט" },
   { command: "premium", description: "💎 רכישת פרימיום לחודש" },
+  { command: "year", description: "🏆 רכישת פרימיום לשנה" },
+  { command: "forever", description: "♾️ רכישת פרימיום לנצח" },
   { command: "search", description: "⚡ רכישת חיפוש נוסף חד־פעמי" },
   { command: "daily", description: "📅 רכישת +1 חיפוש בכל יום" },
 ];

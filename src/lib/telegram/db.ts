@@ -30,6 +30,13 @@ export interface BotSettings {
   price_single_search: number;
   price_daily_extra: number;
   price_premium: number;
+  price_premium_year: number;
+  price_premium_forever: number;
+  enable_single: boolean;
+  enable_daily: boolean;
+  enable_premium: boolean;
+  enable_premium_year: boolean;
+  enable_premium_forever: boolean;
 }
 
 export async function getSettings(): Promise<BotSettings> {
@@ -929,6 +936,22 @@ export async function setPremium(telegram_id: number, on: boolean, days: number 
 }
 
 /** Premium members whose period ends within `days` and were not warned yet. */
+export async function setPremiumForever(telegram_id: number) {
+  await ensureEntitlements(telegram_id);
+  const cur = await getEntitlements(telegram_id).catch(() => null);
+  await admin()
+    .from("user_entitlements")
+    .update({
+      is_premium: true,
+      premium_until: null,
+      premium_warned_at: null,
+      premium_expired_notified_at: null,
+      ...(cur?.is_premium ? {} : { premium_since: new Date().toISOString() }),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("telegram_id", telegram_id);
+}
+
 export async function premiumExpiringSoon(days: number, limit = 200) {
   const until = new Date(Date.now() + days * 86400_000).toISOString();
   const { data } = await admin()

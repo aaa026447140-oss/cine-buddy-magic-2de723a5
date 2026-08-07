@@ -125,10 +125,17 @@ export type Database = {
       bot_settings: {
         Row: {
           builder_username: string | null
+          enable_daily: boolean
+          enable_premium: boolean
+          enable_premium_forever: boolean
+          enable_premium_year: boolean
+          enable_single: boolean
           free_searches_per_day: number
           id: number
           price_daily_extra: number
           price_premium: number
+          price_premium_forever: number
+          price_premium_year: number
           price_single_search: number
           quota_enabled: boolean
           required_channel_id: number | null
@@ -148,10 +155,17 @@ export type Database = {
         }
         Insert: {
           builder_username?: string | null
+          enable_daily?: boolean
+          enable_premium?: boolean
+          enable_premium_forever?: boolean
+          enable_premium_year?: boolean
+          enable_single?: boolean
           free_searches_per_day?: number
           id?: number
           price_daily_extra?: number
           price_premium?: number
+          price_premium_forever?: number
+          price_premium_year?: number
           price_single_search?: number
           quota_enabled?: boolean
           required_channel_id?: number | null
@@ -171,10 +185,17 @@ export type Database = {
         }
         Update: {
           builder_username?: string | null
+          enable_daily?: boolean
+          enable_premium?: boolean
+          enable_premium_forever?: boolean
+          enable_premium_year?: boolean
+          enable_single?: boolean
           free_searches_per_day?: number
           id?: number
           price_daily_extra?: number
           price_premium?: number
+          price_premium_forever?: number
+          price_premium_year?: number
           price_single_search?: number
           quota_enabled?: boolean
           required_channel_id?: number | null

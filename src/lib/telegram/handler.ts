@@ -72,6 +72,7 @@ import {
   addBonusDaily,
   addExtraCredits,
   setPremium,
+  setPremiumForever,
   registerReferral,
   searchesUsedToday,
   premiumIdsAmong,
@@ -315,9 +316,11 @@ function quotaText(q: QuotaInfo, s: BotSettings, botUsername: string, userId: nu
     `\n📣 <b>הזמן חברים</b> — כל משתמש חדש שיצטרף דרך הקישור שלך מוסיף לך <b>+1 חיפוש בכל יום</b>, לתמיד.\n` +
     `🔗 <code>https://t.me/${botUsername}?start=r_${userId}</code>\n\n` +
     `💫 אפשר גם לרכוש:\n` +
-    `• ⚡ חיפוש נוסף חד־פעמי — ${s.price_single_search} ⭐\n` +
-    `• 📅 +1 חיפוש בכל יום (לתמיד) — ${s.price_daily_extra} ⭐\n` +
-    `• 💎 פרימיום לחודש ללא הגבלה — ${s.price_premium} ⭐`
+    (s.enable_single ? `• ⚡ חיפוש נוסף חד־פעמי — ${s.price_single_search} ⭐\n` : "") +
+    (s.enable_daily ? `• 📅 +1 חיפוש בכל יום (לתמיד) — ${s.price_daily_extra} ⭐\n` : "") +
+    (s.enable_premium ? `• 💎 פרימיום לחודש ללא הגבלה — ${s.price_premium} ⭐\n` : "") +
+    (s.enable_premium_year ? `• 🏆 פרימיום לשנה ללא הגבלה — ${s.price_premium_year} ⭐\n` : "") +
+    (s.enable_premium_forever ? `• ♾️ פרימיום לנצח ללא הגבלה — ${s.price_premium_forever} ⭐\n` : "")
   );
 }
 
@@ -339,9 +342,11 @@ function quotaAdminText(s: BotSettings): string {
     `🎟️ <b>ניהול חיפושים ומחירים</b>\n\n` +
     `מצב: <b>${s.quota_enabled ? "מוגבל (מכסה יומית)" : "חופשי — ללא הגבלה"}</b>\n` +
     `🔢 חיפושים חינם ליום: <b>${s.free_searches_per_day}</b>\n` +
-    `⚡ חיפוש חד־פעמי: <b>${s.price_single_search}</b> ⭐\n` +
-    `📅 +1 חיפוש בכל יום: <b>${s.price_daily_extra}</b> ⭐\n` +
-    `💎 פרימיום ללא הגבלה: <b>${s.price_premium}</b> ⭐\n\n` +
+    `⚡ חיפוש חד־פעמי: <b>${s.price_single_search}</b> ⭐ ${s.enable_single ? "🟢" : "🔴"}\n` +
+    `📅 +1 חיפוש בכל יום: <b>${s.price_daily_extra}</b> ⭐ ${s.enable_daily ? "🟢" : "🔴"}\n` +
+    `💎 פרימיום לחודש: <b>${s.price_premium}</b> ⭐ ${s.enable_premium ? "🟢" : "🔴"}\n` +
+    `🏆 פרימיום לשנה: <b>${s.price_premium_year}</b> ⭐ ${s.enable_premium_year ? "🟢" : "🔴"}\n` +
+    `♾️ פרימיום לנצח: <b>${s.price_premium_forever}</b> ⭐ ${s.enable_premium_forever ? "🟢" : "🔴"}\n\n` +
     `🎁 כל משתמש חדש שמצטרף דרך קישור ההזמנה מוסיף למזמין +1 חיפוש בכל יום.`
   );
 }
@@ -591,15 +596,18 @@ async function handleMessage(msg: any) {
       } else if (kind === "daily") {
         await addBonusDaily(Number(from.id), 1).catch(() => {});
         await sendMessage(chat.id, "📅 מעכשיו יש לך +1 חיפוש בכל יום, לתמיד. תודה! ❤️");
-      } else if (kind === "premium") {
-        await setPremium(Number(from.id), true).catch(() => {});
+      } else if (kind === "premium_forever") {
+        await setPremiumForever(Number(from.id)).catch(() => {});
+        await sendMessage(chat.id, "♾️ הפרימיום הופעל <b>לנצח</b>! חיפושים ללא הגבלה, ללא תאריך סיום. תודה! ❤️");
+      } else if (kind === "premium" || kind === "premium_year") {
+        await setPremium(Number(from.id), true, kind === "premium_year" ? 365 : 30).catch(() => {});
         const entP = await getEntitlements(Number(from.id)).catch(() => null);
         const untilTxt = entP?.premium_until
           ? new Date(entP.premium_until).toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" })
           : "";
         await sendMessage(
           chat.id,
-          `💎 הפרימיום הופעל לחודש! חיפושים ללא הגבלה${untilTxt ? ` עד <b>${untilTxt}</b>` : ""}. תודה! ❤️`,
+          `💎 הפרימיום הופעל ל${kind === "premium_year" ? "שנה" : "חודש"}! חיפושים ללא הגבלה${untilTxt ? ` עד <b>${untilTxt}</b>` : ""}. תודה! ❤️`,
         );
       }
       return;
@@ -692,10 +700,8 @@ async function handleMessage(msg: any) {
       return await sendQuotaMenu(chat.id, Number(from.id));
     }
     if (payload.startsWith("buy_")) {
-      const kind = payload.slice(4) as "single" | "daily" | "premium";
-      if (kind === "single" || kind === "daily" || kind === "premium") {
-        return await sendPurchaseInvoice(chat.id, Number(from.id), kind);
-      }
+      const kind = PURCHASE_KINDS[payload.slice(4)];
+      if (kind) return await sendPurchaseInvoice(chat.id, Number(from.id), kind);
     }
     return await sendStartMenu(chat.id, Number(from.id));
   }
@@ -925,8 +931,50 @@ async function sendStartMenu(chatId: number, userId: number) {
   await sendMessage(chatId, v.text, { reply_markup: v.reply_markup });
 }
 
-const PURCHASE_KINDS: Record<string, "single" | "daily" | "premium"> = {
+export type BuyKind = "single" | "daily" | "premium" | "premium_year" | "premium_forever";
+
+/** Prices, labels and on/off state for every purchasable item. */
+function purchaseCatalog(s: BotSettings): Record<BuyKind, { amount: number; title: string; desc: string; enabled: boolean }> {
+  return {
+    single: {
+      amount: s.price_single_search,
+      title: "חיפוש נוסף חד־פעמי",
+      desc: "חיפוש אחד נוסף מעבר למכסה היומית.",
+      enabled: !!s.enable_single,
+    },
+    daily: {
+      amount: s.price_daily_extra,
+      title: "+1 חיפוש בכל יום",
+      desc: "תוספת קבועה של חיפוש אחד בכל יום, לתמיד.",
+      enabled: !!s.enable_daily,
+    },
+    premium: {
+      amount: s.price_premium,
+      title: "פרימיום לחודש — ללא הגבלה",
+      desc: "חיפושים ללא הגבלה למשך 30 ימים.",
+      enabled: !!s.enable_premium,
+    },
+    premium_year: {
+      amount: s.price_premium_year,
+      title: "פרימיום לשנה — ללא הגבלה",
+      desc: "חיפושים ללא הגבלה למשך 365 ימים.",
+      enabled: !!s.enable_premium_year,
+    },
+    premium_forever: {
+      amount: s.price_premium_forever,
+      title: "פרימיום לנצח — ללא הגבלה",
+      desc: "חיפושים ללא הגבלה, ללא תאריך סיום.",
+      enabled: !!s.enable_premium_forever,
+    },
+  };
+}
+
+const PURCHASE_KINDS: Record<string, BuyKind> = {
   premium: "premium",
+  year: "premium_year",
+  premium_year: "premium_year",
+  forever: "premium_forever",
+  premium_forever: "premium_forever",
   search: "single",
   single: "single",
   daily: "daily",
@@ -936,13 +984,22 @@ const PURCHASE_KINDS: Record<string, "single" | "daily" | "premium"> = {
 async function sendGroupPurchasePrompt(chatId: number, cmd: string) {
   const me = await getMe();
   const kind = PURCHASE_KINDS[cmd];
-  const labels: Record<string, string> = {
+  const labels: Record<BuyKind, string> = {
     premium: "💎 פרימיום לחודש — ללא הגבלה",
+    premium_year: "🏆 פרימיום לשנה — ללא הגבלה",
+    premium_forever: "♾️ פרימיום לנצח — ללא הגבלה",
     single: "⚡ חיפוש נוסף חד־פעמי",
     daily: "📅 +1 חיפוש בכל יום",
   };
   const payload = kind ? `buy_${kind}` : "quota";
   const label = kind ? labels[kind] : "🎟️ החיפושים שלי";
+  if (kind) {
+    const s = await getSettings();
+    if (!purchaseCatalog(s)[kind].enabled) {
+      await sendMessage(chatId, "🚫 האפשרות הזו אינה זמינה כרגע.").catch(() => {});
+      return;
+    }
+  }
   await sendMessage(chatId, `${label}\n\nהתשלום מתבצע בצ׳אט הפרטי עם הבוט 👇`, {
     reply_markup: {
       inline_keyboard: [[{ text: "המשך בצ׳אט הפרטי", url: `https://t.me/${me.username}?start=${payload}` }]],
@@ -950,15 +1007,15 @@ async function sendGroupPurchasePrompt(chatId: number, cmd: string) {
   });
 }
 
-async function sendPurchaseInvoice(chatId: number, userId: number, kind: "single" | "daily" | "premium") {
+async function sendPurchaseInvoice(chatId: number, userId: number, kind: BuyKind) {
   const s = await getSettings();
-  const map: Record<string, { amount: number; title: string; desc: string }> = {
-    single: { amount: s.price_single_search, title: "חיפוש נוסף חד־פעמי", desc: "חיפוש אחד נוסף מעבר למכסה היומית." },
-    daily: { amount: s.price_daily_extra, title: "+1 חיפוש בכל יום", desc: "תוספת קבועה של חיפוש אחד בכל יום, לתמיד." },
-    premium: { amount: s.price_premium, title: "פרימיום לחודש — ללא הגבלה", desc: "חיפושים ללא הגבלה למשך 30 ימים." },
-  };
-  const item = map[kind];
-  if (!item || !(item.amount > 0)) return;
+  const item = purchaseCatalog(s)[kind];
+  if (!item) return;
+  if (!item.enabled) {
+    await sendMessage(chatId, "🚫 האפשרות הזו אינה זמינה כרגע.").catch(() => {});
+    return;
+  }
+  if (!(item.amount > 0)) return;
   await sendInvoice({
     chat_id: chatId,
     title: item.title,
@@ -1231,7 +1288,10 @@ async function handleCallback(cq: any) {
     await tg("deleteMessage", { chat_id: chatId, message_id: msg.message_id }).catch(() => {});
     const sP = await getSettings();
     const amount = Number(sP.price_premium || 0);
-    if (!(amount > 0)) return;
+    if (!sP.enable_premium || !(amount > 0)) {
+      await sendMessage(chatId, "🚫 חידוש פרימיום אינו זמין כרגע.").catch(() => {});
+      return;
+    }
     await sendInvoice({
       chat_id: chatId,
       title: "חידוש פרימיום — חודש נוסף",
@@ -1246,28 +1306,9 @@ async function handleCallback(cq: any) {
     return;
   }
 
-  if (data === "buy_single" || data === "buy_daily" || data === "buy_premium") {
+  if (data.startsWith("buy_") && PURCHASE_KINDS[data.slice(4)]) {
     await answerCallbackQuery(cq.id);
-    const s = await getSettings();
-    const kind = data.slice(4);
-    const map: Record<string, { amount: number; title: string; desc: string }> = {
-      single: { amount: s.price_single_search, title: "חיפוש נוסף חד־פעמי", desc: "חיפוש אחד נוסף מעבר למכסה היומית." },
-      daily: { amount: s.price_daily_extra, title: "+1 חיפוש בכל יום", desc: "תוספת קבועה של חיפוש אחד בכל יום, לתמיד." },
-      premium: { amount: s.price_premium, title: "פרימיום לחודש — ללא הגבלה", desc: "חיפושים ללא הגבלה למשך 30 ימים." },
-    };
-    const item = map[kind];
-    if (!item || !(item.amount > 0)) return;
-    await sendInvoice({
-      chat_id: chatId,
-      title: item.title,
-      description: item.desc,
-      payload: `buy:${kind}:${from.id}:${Date.now()}`,
-      currency: "XTR",
-      prices: [{ label: `${item.amount} Stars`, amount: item.amount }],
-    }).catch((e: any) => {
-      console.error("sendInvoice failed:", e?.message);
-      sendMessage(chatId, "❌ לא הצלחתי לפתוח חלון תשלום. נסה שוב מאוחר יותר.");
-    });
+    await sendPurchaseInvoice(chatId, Number(from.id), PURCHASE_KINDS[data.slice(4)]!);
     return;
   }
 
@@ -1514,6 +1555,18 @@ async function handleAdminCallback(cq: any, data: string) {
       await updateSettings({ quota_enabled: !s.quota_enabled } as any);
       return await renderQuotaAdmin(chatId, messageId, await getSettings());
     }
+    const toggles: Record<string, keyof BotSettings> = {
+      admin_q_t_single: "enable_single",
+      admin_q_t_daily: "enable_daily",
+      admin_q_t_premium: "enable_premium",
+      admin_q_t_year: "enable_premium_year",
+      admin_q_t_forever: "enable_premium_forever",
+    };
+    if (toggles[data]) {
+      const field = toggles[data]!;
+      await updateSettings({ [field]: !s[field] } as any);
+      return await renderQuotaAdmin(chatId, messageId, await getSettings());
+    }
     if (data === "admin_q_reset") {
       await resetDailyQuotaForAll().catch(() => {});
       await sendMessage(
@@ -1527,6 +1580,8 @@ async function handleAdminCallback(cq: any, data: string) {
       admin_q_p_single: "⚡ שלח את המחיר בכוכבים לחיפוש נוסף חד־פעמי:",
       admin_q_p_daily: "📅 שלח את המחיר בכוכבים לתוספת קבועה של חיפוש בכל יום:",
       admin_q_p_premium: "💎 שלח את המחיר בכוכבים לפרימיום (ללא הגבלה):",
+      admin_q_p_year: "🏆 שלח את המחיר בכוכבים לפרימיום לשנה:",
+      admin_q_p_forever: "♾️ שלח את המחיר בכוכבים לפרימיום לנצח:",
     };
     if (prompts[data]) {
       await setAdminState(Number(userId), data);
@@ -2016,14 +2071,15 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
     }
     await setAdminState(userId, null);
     {
-      const field =
-        st.state === "admin_q_free"
-          ? "free_searches_per_day"
-          : st.state === "admin_q_p_single"
-            ? "price_single_search"
-            : st.state === "admin_q_p_daily"
-              ? "price_daily_extra"
-              : "price_premium";
+      const fields: Record<string, string> = {
+        admin_q_free: "free_searches_per_day",
+        admin_q_p_single: "price_single_search",
+        admin_q_p_daily: "price_daily_extra",
+        admin_q_p_premium: "price_premium",
+        admin_q_p_year: "price_premium_year",
+        admin_q_p_forever: "price_premium_forever",
+      };
+      const field = fields[st.state] || "price_premium";
       await updateSettings({ [field]: Math.max(0, n) } as any);
       await sendMessage(chatId, "✅ עודכן.");
     }

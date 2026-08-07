@@ -72,6 +72,7 @@ import {
   addBonusDaily,
   addExtraCredits,
   setPremium,
+  setPremiumForever,
   registerReferral,
   searchesUsedToday,
   premiumIdsAmong,

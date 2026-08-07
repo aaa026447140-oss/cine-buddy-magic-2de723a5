@@ -1288,7 +1288,10 @@ async function handleCallback(cq: any) {
     await tg("deleteMessage", { chat_id: chatId, message_id: msg.message_id }).catch(() => {});
     const sP = await getSettings();
     const amount = Number(sP.price_premium || 0);
-    if (!(amount > 0)) return;
+    if (!sP.enable_premium || !(amount > 0)) {
+      await sendMessage(chatId, "🚫 חידוש פרימיום אינו זמין כרגע.").catch(() => {});
+      return;
+    }
     await sendInvoice({
       chat_id: chatId,
       title: "חידוש פרימיום — חודש נוסף",

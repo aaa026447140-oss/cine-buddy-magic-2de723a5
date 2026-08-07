@@ -30,6 +30,13 @@ export interface BotSettings {
   price_single_search: number;
   price_daily_extra: number;
   price_premium: number;
+  price_premium_year: number;
+  price_premium_forever: number;
+  enable_single: boolean;
+  enable_daily: boolean;
+  enable_premium: boolean;
+  enable_premium_year: boolean;
+  enable_premium_forever: boolean;
 }
 
 export async function getSettings(): Promise<BotSettings> {

@@ -820,8 +820,23 @@ export async function listGroupsDetailed(): Promise<{ chat_id: number; title: st
 }
 
 export async function listUsers(): Promise<number[]> {
-  const { data } = await admin().from("bot_users").select("telegram_id").eq("is_blocked", false);
-  return (data ?? []).map((r: any) => Number(r.telegram_id));
+  // PostgREST caps a plain select at 1000 rows, so page through explicitly.
+  const a = admin();
+  const ids: number[] = [];
+  const step = 1000;
+  for (let from = 0; ; from += step) {
+    const { data, error } = await a
+      .from("bot_users")
+      .select("telegram_id")
+      .eq("is_blocked", false)
+      .order("telegram_id", { ascending: true })
+      .range(from, from + step - 1);
+    if (error) break;
+    const rows = data ?? [];
+    for (const r of rows) ids.push(Number((r as any).telegram_id));
+    if (rows.length < step) break;
+  }
+  return ids;
 }
 
 // ───── Group membership tracking (used to de-duplicate audience numbers) ─────
@@ -838,14 +853,28 @@ export async function touchGroupMember(chat_id: number, user_id: number) {
  */
 export async function uniqueReach(totalGroupMembers: number, privateUserIds: number[]) {
   const a = admin();
-  const { data: known } = await a.from("group_members").select("user_id");
-  const knownGroupUsers = new Set<number>((known ?? []).map((r: any) => Number(r.user_id)));
+  const knownGroupUsers = new Set<number>();
+  const step = 1000;
+  for (let from = 0; ; from += step) {
+    const { data, error } = await a
+      .from("group_members")
+      .select("user_id")
+      .order("user_id", { ascending: true })
+      .range(from, from + step - 1);
+    if (error) break;
+    const rows = data ?? [];
+    for (const r of rows) knownGroupUsers.add(Number((r as any).user_id));
+    if (rows.length < step) break;
+  }
   const privateSet = new Set<number>(privateUserIds);
   let overlap = 0;
   for (const id of knownGroupUsers) if (privateSet.has(id)) overlap++;
   const totalPrivate = privateSet.size;
-  const unique = Math.max(totalGroupMembers, totalGroupMembers + totalPrivate - overlap);
-  return { totalGroupMembers, totalPrivate, overlap, unique };
+  // A person who is both a private user and a group member counts as PRIVATE:
+  // the overlap is deducted from the group side, never from the private side.
+  const groupsOnly = Math.max(0, totalGroupMembers - overlap);
+  const unique = groupsOnly + totalPrivate;
+  return { totalGroupMembers, groupsOnly, totalPrivate, overlap, unique };
 }
 
 // ───── Search quota / entitlements ─────

@@ -1216,13 +1216,14 @@ async function handleCallback(cq: any) {
     const r = await uniqueReach(totalGroupMembers, users).catch(() => null);
     const totalPrivate = users.length;
     const overlap = r?.overlap ?? 0;
-    const combined = Math.max(totalGroupMembers, totalGroupMembers + totalPrivate - overlap);
+    const groupsOnly = Math.max(0, totalGroupMembers - overlap);
+    const combined = groupsOnly + totalPrivate;
     const text =
       `📢 <b>פרסום ממומן</b>\n\n` +
-      `👨‍👩‍👧 סה״כ משתמשים בקבוצות: <b>${totalGroupMembers.toLocaleString()}</b>\n` +
+      `👨‍👩‍👧 סה״כ משתמשים בקבוצות: <b>${groupsOnly.toLocaleString()}</b>\n` +
       `👤 סה״כ משתמשים בפרטי: <b>${totalPrivate.toLocaleString()}</b>\n` +
       `🌐 סה״כ חשיפה ייחודית (ללא כפילויות): <b>${combined.toLocaleString()}</b>\n` +
-      (overlap ? `🔁 נוכו ${overlap.toLocaleString()} משתמשים שנמצאים גם בקבוצה וגם בפרטי\n` : "") +
+      (overlap ? `🔁 ${overlap.toLocaleString()} משתמשים שנמצאים גם בקבוצה וגם בפרטי נספרים כפרטי\n` : "") +
       `\n` +
       `רוצה לפרסם? לחץ על הכפתור למטה.`;
     await editMessageText(chatId, msg.message_id, text, {

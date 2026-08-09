@@ -1362,6 +1362,20 @@ async function handleCallback(cq: any) {
       await sendMessage(chatId, "ℹ️ פניות לאדמין אינן פעילות כרגע.").catch(() => {});
       return;
     }
+    // Only in private chat — in a group this would spam the whole group.
+    if (cq.message?.chat?.type && cq.message.chat.type !== "private") {
+      const me = await getMe();
+      await answerCallbackQuery(cq.id, {
+        text: "פנייה לאדמין זמינה רק בצ׳אט פרטי עם הבוט.",
+        show_alert: true,
+      }).catch(() => {});
+      await sendMessage(chatId, "✉️ כדי לפנות לאדמין — פתח את הצ׳אט הפרטי עם הבוט.", {
+        reply_markup: {
+          inline_keyboard: [[{ text: "✉️ פנייה לאדמין", url: `https://t.me/${me.username}?start=contact` }]],
+        },
+      }).catch(() => {});
+      return;
+    }
     await setAdminState(Number(from.id), "awaiting_support_msg").catch(() => {});
     await sendMessage(
       chatId,

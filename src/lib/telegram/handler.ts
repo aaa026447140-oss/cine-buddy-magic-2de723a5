@@ -553,6 +553,11 @@ async function handleMessage(msg: any) {
       if (text.startsWith("/")) {
         // Public commands work inside groups too (menu + purchase shortcuts).
         const cmd = parseCommand(text);
+        if (cmd === "cancel") {
+          await setAdminState(Number(from.id), null).catch(() => {});
+          await sendMessage(chat.id, "❎ בוטל.", { reply_to_message_id: msg.message_id } as any).catch(() => {});
+          return;
+        }
         if (cmd === "start") {
           await sendStartMenu(chat.id, Number(from.id)).catch(() => {});
           return;

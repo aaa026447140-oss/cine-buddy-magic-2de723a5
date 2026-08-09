@@ -717,6 +717,17 @@ async function handleMessage(msg: any) {
     if (payload === "quota") {
       return await sendQuotaMenu(chat.id, Number(from.id));
     }
+    if (payload === "contact") {
+      const s = await getSettings();
+      if (!s.support_group_id) {
+        return void (await sendMessage(chat.id, "ℹ️ פניות לאדמין אינן פעילות כרגע.").catch(() => {}));
+      }
+      await setAdminState(Number(from.id), "awaiting_support_msg").catch(() => {});
+      return void (await sendMessage(
+        chat.id,
+        "✉️ שלח כאן את ההודעה שלך לאדמין (אפשר גם תמונה או קובץ).\nלביטול שלח /cancel",
+      ).catch(() => {}));
+    }
     if (payload.startsWith("buy_")) {
       const kind = PURCHASE_KINDS[payload.slice(4)];
       if (kind) return await sendPurchaseInvoice(chat.id, Number(from.id), kind);

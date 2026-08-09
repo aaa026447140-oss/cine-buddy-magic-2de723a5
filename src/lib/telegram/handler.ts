@@ -465,6 +465,19 @@ async function requireSubscriptionOrPrompt(
 }
 
 // ───── Main entry ─────
+const seenUpdates = new Set<number>();
+function isDuplicateUpdate(id: number) {
+  if (seenUpdates.has(id)) return true;
+  seenUpdates.add(id);
+  if (seenUpdates.size > 5000) {
+    for (const v of seenUpdates) {
+      seenUpdates.delete(v);
+      if (seenUpdates.size <= 4000) break;
+    }
+  }
+  return false;
+}
+
 export async function handleUpdate(update: any) {
   // ── duplicate-update guard (in-memory, per worker isolate) ──
   try {

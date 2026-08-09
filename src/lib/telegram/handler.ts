@@ -466,6 +466,7 @@ async function requireSubscriptionOrPrompt(
 
 // ───── Main entry ─────
 export async function handleUpdate(update: any) {
+  // ── duplicate-update guard (in-memory, per worker isolate) ──
   try {
     // Telegram re-delivers an update when a webhook answer is slow or fails.
     // Without this guard the same callback (e.g. "פנייה לאדמין") is processed

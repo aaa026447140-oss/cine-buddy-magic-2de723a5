@@ -465,8 +465,26 @@ async function requireSubscriptionOrPrompt(
 }
 
 // ───── Main entry ─────
+const seenUpdates = new Set<number>();
+function isDuplicateUpdate(id: number) {
+  if (seenUpdates.has(id)) return true;
+  seenUpdates.add(id);
+  if (seenUpdates.size > 5000) {
+    for (const v of seenUpdates) {
+      seenUpdates.delete(v);
+      if (seenUpdates.size <= 4000) break;
+    }
+  }
+  return false;
+}
+
 export async function handleUpdate(update: any) {
+  // ── duplicate-update guard (in-memory, per worker isolate) ──
   try {
+    // Telegram re-delivers an update when a webhook answer is slow or fails.
+    // Without this guard the same callback (e.g. "פנייה לאדמין") is processed
+    // again and again, spamming the chat with the same prompt.
+    if (typeof update?.update_id === "number" && isDuplicateUpdate(update.update_id)) return;
     await syncBotCommands().catch(() => {});
     if (update.message) return await handleMessage(update.message);
     if (update.edited_message) return; // ignore edits
@@ -535,6 +553,11 @@ async function handleMessage(msg: any) {
       if (text.startsWith("/")) {
         // Public commands work inside groups too (menu + purchase shortcuts).
         const cmd = parseCommand(text);
+        if (cmd === "cancel") {
+          await setAdminState(Number(from.id), null).catch(() => {});
+          await sendMessage(chat.id, "❎ בוטל.", { reply_to_message_id: msg.message_id } as any).catch(() => {});
+          return;
+        }
         if (cmd === "start") {
           await sendStartMenu(chat.id, Number(from.id)).catch(() => {});
           return;
@@ -698,6 +721,17 @@ async function handleMessage(msg: any) {
     }
     if (payload === "quota") {
       return await sendQuotaMenu(chat.id, Number(from.id));
+    }
+    if (payload === "contact") {
+      const s = await getSettings();
+      if (!s.support_group_id) {
+        return void (await sendMessage(chat.id, "ℹ️ פניות לאדמין אינן פעילות כרגע.").catch(() => {}));
+      }
+      await setAdminState(Number(from.id), "awaiting_support_msg").catch(() => {});
+      return void (await sendMessage(
+        chat.id,
+        "✉️ שלח כאן את ההודעה שלך לאדמין (אפשר גם תמונה או קובץ).\nלביטול שלח /cancel",
+      ).catch(() => {}));
     }
     if (payload.startsWith("buy_")) {
       const kind = PURCHASE_KINDS[payload.slice(4)];
@@ -1342,6 +1376,20 @@ async function handleCallback(cq: any) {
     const s = await getSettings();
     if (!s.support_group_id) {
       await sendMessage(chatId, "ℹ️ פניות לאדמין אינן פעילות כרגע.").catch(() => {});
+      return;
+    }
+    // Only in private chat — in a group this would spam the whole group.
+    if (cq.message?.chat?.type && cq.message.chat.type !== "private") {
+      const me = await getMe();
+      await answerCallbackQuery(cq.id, {
+        text: "פנייה לאדמין זמינה רק בצ׳אט פרטי עם הבוט.",
+        show_alert: true,
+      }).catch(() => {});
+      await sendMessage(chatId, "✉️ כדי לפנות לאדמין — פתח את הצ׳אט הפרטי עם הבוט.", {
+        reply_markup: {
+          inline_keyboard: [[{ text: "✉️ פנייה לאדמין", url: `https://t.me/${me.username}?start=contact` }]],
+        },
+      }).catch(() => {});
       return;
     }
     await setAdminState(Number(from.id), "awaiting_support_msg").catch(() => {});

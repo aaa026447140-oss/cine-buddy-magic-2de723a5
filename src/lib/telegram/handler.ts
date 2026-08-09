@@ -538,6 +538,11 @@ async function handleMessage(msg: any) {
   const from = msg.from;
   if (!from) return;
 
+  // Never process messages created by bots or automatic channel-to-discussion
+  // forwards. In a linked discussion group they can otherwise be interpreted
+  // as fresh user searches and create a self-sustaining reply loop.
+  if (from.is_bot || msg.is_automatic_forward) return;
+
   // Group: track membership and handle search by text
   if (chat.type === "group" || chat.type === "supergroup") {
     // Admin contact group: relay main-admin replies back to the user.
@@ -1372,26 +1377,26 @@ async function handleCallback(cq: any) {
   }
 
   if (data === "contact_admin") {
-    await answerCallbackQuery(cq.id);
     const s = await getSettings();
     if (!s.support_group_id) {
-      await sendMessage(chatId, "ℹ️ פניות לאדמין אינן פעילות כרגע.").catch(() => {});
-      return;
-    }
-    // Only in private chat — in a group this would spam the whole group.
-    if (cq.message?.chat?.type && cq.message.chat.type !== "private") {
-      const me = await getMe();
       await answerCallbackQuery(cq.id, {
-        text: "פנייה לאדמין זמינה רק בצ׳אט פרטי עם הבוט.",
+        text: "פניות לאדמין אינן פעילות כרגע.",
         show_alert: true,
       }).catch(() => {});
-      await sendMessage(chatId, "✉️ כדי לפנות לאדמין — פתח את הצ׳אט הפרטי עם הבוט.", {
-        reply_markup: {
-          inline_keyboard: [[{ text: "✉️ פנייה לאדמין", url: `https://t.me/${me.username}?start=contact` }]],
-        },
+      return;
+    }
+    // In groups, never create another message containing the same contact
+    // action. Linked discussion groups can feed that message back as an
+    // automatic forward and cause an endless loop. The alert is private to
+    // the user who pressed the button.
+    if (cq.message?.chat?.type && cq.message.chat.type !== "private") {
+      await answerCallbackQuery(cq.id, {
+        text: "כדי לפנות לאדמין, פתח את הצ׳אט הפרטי עם הבוט ולחץ שם על «פנייה לאדמין».",
+        show_alert: true,
       }).catch(() => {});
       return;
     }
+    await answerCallbackQuery(cq.id).catch(() => {});
     await setAdminState(Number(from.id), "awaiting_support_msg").catch(() => {});
     await sendMessage(
       chatId,

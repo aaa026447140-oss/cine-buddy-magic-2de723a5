@@ -467,6 +467,10 @@ async function requireSubscriptionOrPrompt(
 // ───── Main entry ─────
 export async function handleUpdate(update: any) {
   try {
+    // Telegram re-delivers an update when a webhook answer is slow or fails.
+    // Without this guard the same callback (e.g. "פנייה לאדמין") is processed
+    // again and again, spamming the chat with the same prompt.
+    if (typeof update?.update_id === "number" && isDuplicateUpdate(update.update_id)) return;
     await syncBotCommands().catch(() => {});
     if (update.message) return await handleMessage(update.message);
     if (update.edited_message) return; // ignore edits

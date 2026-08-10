@@ -717,7 +717,9 @@ async function handleMessage(msg: any) {
     if (payload.startsWith("r_")) {
       const referrer = Number(payload.slice(2));
       if (Number.isFinite(referrer) && referrer !== Number(from.id)) {
-        const ok = await registerReferral(Number(from.id), referrer).catch(() => false);
+        const ok = await registerReferral(Number(from.id), referrer, isFirstTimeUser).catch(
+          () => false,
+        );
         if (ok) {
           const settings = await getSettings();
           if (settings.quota_enabled) {

@@ -801,6 +801,32 @@ function blockedNoticeText(u: { blocked_until?: string | null; block_reason?: st
 
 // ───── Admin contact group (support tickets) ─────
 
+/**
+ * Resolves (or creates) the forum topic dedicated to one user inside the
+ * contact group. Returns null when the group is not in topics mode.
+ */
+async function ensureSupportTopic(gid: number, from: any): Promise<number | null> {
+  const chat: any = await getChat(gid).catch(() => null);
+  if (!chat?.is_forum) return null;
+  const uid = Number(from.id);
+  const existing = await getSupportTopicId(gid, uid).catch(() => null);
+  if (existing) return existing;
+  const label =
+    ([from.first_name, from.last_name].filter(Boolean).join(" ") ||
+      (from.username ? `@${from.username}` : String(uid))).slice(0, 100);
+  const name = `${label} · ${uid}`.slice(0, 128);
+  try {
+    const topic: any = await createForumTopic(gid, name);
+    const tid = Number(topic?.message_thread_id || 0);
+    if (!tid) return null;
+    await saveSupportTopic(gid, uid, tid).catch(() => {});
+    return tid;
+  } catch (e: any) {
+    console.error("createForumTopic failed:", e?.description || e?.message);
+    return null;
+  }
+}
+
 /** A user's message to the admin: copied into the contact group with a header. */
 async function forwardSupportMessage(msg: any) {
   const from = msg.from;
@@ -810,17 +836,37 @@ async function forwardSupportMessage(msg: any) {
     await sendMessage(msg.chat.id, "❌ אין כרגע קבוצת פניות מוגדרת. נסה שוב מאוחר יותר.").catch(() => {});
     return;
   }
+  let topicId = await ensureSupportTopic(gid, from);
   const name = escapeHtml(
     [from.first_name, from.last_name].filter(Boolean).join(" ") || String(from.id),
   );
+  const isNewTopicMsg = !!topicId;
   const header =
     `✉️ <b>פנייה חדשה</b>\n` +
     `👤 ${name}${from.username ? ` · @${escapeHtml(from.username)}` : ""}\n` +
     `🆔 <code>${from.id}</code>\n\n` +
-    `<i>כדי להשיב — הגב על ההודעה הזו או על ההודעה של המשתמש.</i>`;
+    (isNewTopicMsg
+      ? `<i>כל הודעה שתישלח בנושא הזה תגיע ישירות למשתמש.</i>`
+      : `<i>כדי להשיב — הגב על ההודעה הזו או על ההודעה של המשתמש.</i>`);
   try {
-    const head: any = await sendMessage(gid, header);
-    const copied: any = await copyMessage(gid, msg.chat.id, msg.message_id);
+    const opts: any = topicId ? { message_thread_id: topicId } : {};
+    let head: any;
+    try {
+      head = await sendMessage(gid, header, opts);
+    } catch (e: any) {
+      // The topic was deleted in the group: drop it and open a fresh one.
+      if (topicId && /thread not found/i.test(String(e?.description || ""))) {
+        await deleteSupportTopic(gid, Number(from.id)).catch(() => {});
+        topicId = await ensureSupportTopic(gid, from);
+        head = await sendMessage(gid, header, topicId ? { message_thread_id: topicId } : {});
+      } else throw e;
+    }
+    const copied: any = await copyMessage(
+      gid,
+      msg.chat.id,
+      msg.message_id,
+      topicId ? { message_thread_id: topicId } : {},
+    );
     if (head?.message_id) await saveSupportThread(gid, Number(head.message_id), Number(from.id)).catch(() => {});
     if (copied?.message_id) await saveSupportThread(gid, Number(copied.message_id), Number(from.id)).catch(() => {});
     await sendMessage(msg.chat.id, "✅ הפנייה נשלחה לאדמין. תקבל תשובה כאן בצ׳אט.").catch(() => {});
@@ -835,33 +881,44 @@ async function handleSupportGroupMessage(msg: any) {
   const from = msg.from;
   if (Number(from?.id) !== ADMIN_ID) return;
   if (msg.text && msg.text.trim() === "/cancel") return;
+  if (msg.forum_topic_created || msg.forum_topic_edited || msg.forum_topic_closed || msg.forum_topic_reopened) return;
   const replyTo = msg.reply_to_message;
-  if (!replyTo) {
+  const threadId = Number(msg.message_thread_id || 0);
+  // Topics mode: every message inside a user's topic goes straight to them.
+  const topicUser = threadId
+    ? await getSupportTopicUser(Number(msg.chat.id), threadId).catch(() => null)
+    : null;
+  if (!replyTo && !topicUser) {
     await sendMessage(
       msg.chat.id,
       "ℹ️ כדי לשלוח הודעה למשתמש — <b>הגב על ההודעה שלו</b> כאן בקבוצה. הודעה שלא נשלחה כתגובה לא נשלחת לאף אחד.",
-      { reply_to_message_id: msg.message_id } as any,
+      { reply_to_message_id: msg.message_id, ...(threadId ? { message_thread_id: threadId } : {}) } as any,
     ).catch(() => {});
     return;
   }
-  const target = await getSupportThreadUser(Number(msg.chat.id), Number(replyTo.message_id)).catch(() => null);
+  const target =
+    topicUser ??
+    (await getSupportThreadUser(Number(msg.chat.id), Number(replyTo.message_id)).catch(() => null));
   if (!target) {
     await sendMessage(
       msg.chat.id,
       "❌ לא זיהיתי משתמש בהודעה שהגבת עליה. הגב על הודעת הפנייה של המשתמש.",
-      { reply_to_message_id: msg.message_id } as any,
+      { reply_to_message_id: msg.message_id, ...(threadId ? { message_thread_id: threadId } : {}) } as any,
     ).catch(() => {});
     return;
   }
   try {
     await sendMessage(target, "📩 <b>הודעה מהאדמין</b>").catch(() => {});
     await copyMessage(target, msg.chat.id, msg.message_id);
-    await sendMessage(msg.chat.id, "✅ נשלח למשתמש.", { reply_to_message_id: msg.message_id } as any).catch(() => {});
+    await sendMessage(msg.chat.id, "✅ נשלח למשתמש.", {
+      reply_to_message_id: msg.message_id,
+      ...(threadId ? { message_thread_id: threadId } : {}),
+    } as any).catch(() => {});
   } catch (e: any) {
     await sendMessage(
       msg.chat.id,
       `❌ לא הצלחתי לשלוח למשתמש: ${escapeHtml(e?.description || e?.message || "")}`,
-      { reply_to_message_id: msg.message_id } as any,
+      { reply_to_message_id: msg.message_id, ...(threadId ? { message_thread_id: threadId } : {}) } as any,
     ).catch(() => {});
   }
 }

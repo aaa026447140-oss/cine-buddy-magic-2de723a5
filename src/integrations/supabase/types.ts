@@ -150,6 +150,7 @@ export type Database = {
           support_chat_url: string | null
           support_group_id: number | null
           support_group_title: string | null
+          support_topics_enabled: boolean
           updated_at: string
           updates_channel_url: string | null
         }
@@ -180,6 +181,7 @@ export type Database = {
           support_chat_url?: string | null
           support_group_id?: number | null
           support_group_title?: string | null
+          support_topics_enabled?: boolean
           updated_at?: string
           updates_channel_url?: string | null
         }
@@ -210,6 +212,7 @@ export type Database = {
           support_chat_url?: string | null
           support_group_id?: number | null
           support_group_title?: string | null
+          support_topics_enabled?: boolean
           updated_at?: string
           updates_channel_url?: string | null
         }

@@ -43,6 +43,9 @@ export const getChatMember = (chat_id: number | string, user_id: number) =>
 
 export const getChat = (chat_id: number | string) => tg("getChat", { chat_id });
 
+export const createForumTopic = (chat_id: number | string, name: string, opts: any = {}) =>
+  tg<{ message_thread_id: number }>("createForumTopic", { chat_id, name, ...opts });
+
 export const getChatMemberCount = (chat_id: number | string) =>
   tg<number>("getChatMemberCount", { chat_id });
 

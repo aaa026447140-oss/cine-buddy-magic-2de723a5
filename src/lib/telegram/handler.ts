@@ -98,6 +98,8 @@ import {
   saveSupportThread,
   getSupportThreadUser,
   getSupportTopicId,
+  listSupportUsers,
+  clearSupportTopics,
   saveSupportTopic,
   getSupportTopicUser,
   deleteSupportTopic,
@@ -1760,7 +1762,7 @@ async function handleAdminCallback(cq: any, data: string) {
         for (const uid of users) {
           const existing = await getSupportTopicId(gid, uid).catch(() => null);
           if (existing) continue;
-          const u = await getUser(uid).catch(() => null);
+          const u = await getBotUser(uid).catch(() => null);
           const tid = await ensureSupportTopic(gid, {
             id: uid,
             first_name: (u as any)?.first_name,

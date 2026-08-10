@@ -806,6 +806,8 @@ function blockedNoticeText(u: { blocked_until?: string | null; block_reason?: st
  * contact group. Returns null when the group is not in topics mode.
  */
 async function ensureSupportTopic(gid: number, from: any): Promise<number | null> {
+  const s = await getSettings().catch(() => null);
+  if (!s?.support_topics_enabled) return null;
   const chat: any = await getChat(gid).catch(() => null);
   if (!chat?.is_forum) return null;
   const uid = Number(from.id);
@@ -885,7 +887,8 @@ async function handleSupportGroupMessage(msg: any) {
   const replyTo = msg.reply_to_message;
   const threadId = Number(msg.message_thread_id || 0);
   // Topics mode: every message inside a user's topic goes straight to them.
-  const topicUser = threadId
+  const cfg = await getSettings().catch(() => null);
+  const topicUser = threadId && cfg?.support_topics_enabled
     ? await getSupportTopicUser(Number(msg.chat.id), threadId).catch(() => null)
     : null;
   if (!replyTo && !topicUser) {

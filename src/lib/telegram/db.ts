@@ -25,6 +25,7 @@ export interface BotSettings {
   search_group_title: string | null;
   support_group_id: number | null;
   support_group_title: string | null;
+  support_topics_enabled: boolean;
   quota_enabled: boolean;
   free_searches_per_day: number;
   price_single_search: number;
@@ -1695,4 +1696,20 @@ export async function deleteSupportTopic(group_chat_id: number, telegram_id: num
     .delete()
     .eq("group_chat_id", group_chat_id)
     .eq("telegram_id", telegram_id);
+}
+
+/** Every user that ever opened a ticket in the contact group. */
+export async function listSupportUsers(group_chat_id: number): Promise<number[]> {
+  const { data } = await admin()
+    .from("support_threads" as any)
+    .select("telegram_id")
+    .eq("group_chat_id", group_chat_id)
+    .limit(2000);
+  const ids = new Set<number>();
+  for (const r of (data as any[]) || []) ids.add(Number(r.telegram_id));
+  return [...ids];
+}
+
+export async function clearSupportTopics(group_chat_id: number) {
+  await admin().from("support_topics" as any).delete().eq("group_chat_id", group_chat_id);
 }

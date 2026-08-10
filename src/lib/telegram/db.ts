@@ -1661,3 +1661,38 @@ export async function getSupportThreadUser(group_chat_id: number, group_message_
     .maybeSingle();
   return (data as any)?.telegram_id ? Number((data as any).telegram_id) : null;
 }
+
+// ───── Forum topics (one topic per user in the contact group) ─────
+export async function getSupportTopicId(group_chat_id: number, telegram_id: number): Promise<number | null> {
+  const { data } = await admin()
+    .from("support_topics" as any)
+    .select("topic_id")
+    .eq("group_chat_id", group_chat_id)
+    .eq("telegram_id", telegram_id)
+    .maybeSingle();
+  return (data as any)?.topic_id ? Number((data as any).topic_id) : null;
+}
+
+export async function saveSupportTopic(group_chat_id: number, telegram_id: number, topic_id: number) {
+  await admin()
+    .from("support_topics" as any)
+    .upsert({ group_chat_id, telegram_id, topic_id } as any, { onConflict: "group_chat_id,telegram_id" });
+}
+
+export async function getSupportTopicUser(group_chat_id: number, topic_id: number): Promise<number | null> {
+  const { data } = await admin()
+    .from("support_topics" as any)
+    .select("telegram_id")
+    .eq("group_chat_id", group_chat_id)
+    .eq("topic_id", topic_id)
+    .maybeSingle();
+  return (data as any)?.telegram_id ? Number((data as any).telegram_id) : null;
+}
+
+export async function deleteSupportTopic(group_chat_id: number, telegram_id: number) {
+  await admin()
+    .from("support_topics" as any)
+    .delete()
+    .eq("group_chat_id", group_chat_id)
+    .eq("telegram_id", telegram_id);
+}

@@ -5,6 +5,7 @@ import {
   editMessageText,
   getChat,
   createForumTopic,
+  deleteForumTopic,
   getChatMember,
   getChatMemberCount,
   pinChatMessage,
@@ -98,8 +99,8 @@ import {
   saveSupportThread,
   getSupportThreadUser,
   getSupportTopicId,
-  listSupportUsers,
   clearSupportTopics,
+  listSupportTopicIds,
   saveSupportTopic,
   getSupportTopicUser,
   deleteSupportTopic,
@@ -1754,37 +1755,29 @@ async function handleAdminCallback(cq: any, data: string) {
           ).catch(() => {});
         }
         await updateSettings({ support_topics_enabled: true } as any);
-        await editMessageText(chatId, messageId, "🧵 מפעיל מצב נושאים וממיין את כל השיחות...", {
-          reply_markup: { inline_keyboard: [[{ text: "« חזרה", callback_data: "admin_open" }]] },
-        }).catch(() => {});
-        const users = await listSupportUsers(gid).catch(() => [] as number[]);
-        let created = 0;
-        for (const uid of users) {
-          const existing = await getSupportTopicId(gid, uid).catch(() => null);
-          if (existing) continue;
-          const u = await getBotUser(uid).catch(() => null);
-          const tid = await ensureSupportTopic(gid, {
-            id: uid,
-            first_name: (u as any)?.first_name,
-            last_name: (u as any)?.last_name,
-            username: (u as any)?.username,
-          });
-          if (tid) created++;
-          await new Promise((r) => setTimeout(r, 400));
-        }
         return await editMessageText(
           chatId,
           messageId,
-          `✅ מצב נושאים <b>הופעל</b>.\nנפתחו ${created} נושאים חדשים (סה״כ ${users.length} משתמשים ידועים).`,
+          "✅ מצב נושאים <b>הופעל</b>.\nנושא ייעודי ייפתח אוטומטית לכל משתמש ברגע שהוא שולח פנייה — לא נפתחים נושאים למשתמשים שלא כתבו.",
           { reply_markup: { inline_keyboard: [[{ text: "« חזרה", callback_data: "admin_open" }]] } },
         ).catch(() => {});
       }
       await updateSettings({ support_topics_enabled: false } as any);
+      // Telegram has no API to switch a group out of forum mode — the best we can
+      // do is delete every topic the bot opened, then tell the admin where to
+      // turn "Topics" off in the group settings.
+      const topicIds = await listSupportTopicIds(gid).catch(() => [] as number[]);
+      let removed = 0;
+      for (const tid of topicIds) {
+        const ok = await deleteForumTopic(gid, tid).then(() => true).catch(() => false);
+        if (ok) removed++;
+        await new Promise((r) => setTimeout(r, 200));
+      }
       await clearSupportTopics(gid).catch(() => {});
       return await editMessageText(
         chatId,
         messageId,
-        "✅ מצב נושאים <b>כובה</b>. הפניות יגיעו כרגיל לצ׳אט הראשי של הקבוצה (מענה בתגובה להודעה).",
+        `✅ מצב נושאים <b>כובה</b>. נמחקו ${removed} נושאים, והפניות יגיעו כרגיל לצ׳אט הראשי של הקבוצה (מענה בתגובה להודעה).\n\n⚠️ טלגרם לא מאפשר לבוט לבטל את מצב הנושאים בקבוצה עצמה — אם תרצה, כבה «Topics» ידנית בהגדרות הקבוצה.`,
         { reply_markup: { inline_keyboard: [[{ text: "« חזרה", callback_data: "admin_open" }]] } },
       ).catch(() => {});
     }

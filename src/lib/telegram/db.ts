@@ -1713,3 +1713,13 @@ export async function listSupportUsers(group_chat_id: number): Promise<number[]>
 export async function clearSupportTopics(group_chat_id: number) {
   await admin().from("support_topics" as any).delete().eq("group_chat_id", group_chat_id);
 }
+
+/** All topic ids currently mapped in the contact group. */
+export async function listSupportTopicIds(group_chat_id: number): Promise<number[]> {
+  const { data } = await admin()
+    .from("support_topics" as any)
+    .select("topic_id")
+    .eq("group_chat_id", group_chat_id)
+    .limit(2000);
+  return ((data as any[]) || []).map((r) => Number(r.topic_id)).filter(Boolean);
+}

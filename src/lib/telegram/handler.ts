@@ -65,6 +65,7 @@ import {
   updateSettings,
   upsertGroup,
   upsertUser,
+  isBrandNewUser,
   userStars,
   touchGroupMember,
   uniqueReach,
@@ -597,6 +598,8 @@ async function handleMessage(msg: any) {
 
   // Private chat
   if (chat.type !== "private") return;
+  // Must be evaluated BEFORE upsertUser, otherwise everyone looks "new".
+  const isFirstTimeUser = await isBrandNewUser(Number(from.id)).catch(() => false);
   await upsertUser({
     id: Number(from.id),
     username: from.username,
@@ -714,7 +717,9 @@ async function handleMessage(msg: any) {
     if (payload.startsWith("r_")) {
       const referrer = Number(payload.slice(2));
       if (Number.isFinite(referrer) && referrer !== Number(from.id)) {
-        const ok = await registerReferral(Number(from.id), referrer).catch(() => false);
+        const ok = await registerReferral(Number(from.id), referrer, isFirstTimeUser).catch(
+          () => false,
+        );
         if (ok) {
           const settings = await getSettings();
           if (settings.quota_enabled) {

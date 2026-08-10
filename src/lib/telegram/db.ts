@@ -1029,9 +1029,39 @@ export async function expirePremium(telegram_id: number) {
     .eq("telegram_id", telegram_id);
 }
 
-/** Register a referral once; grants the referrer +1 permanent daily search. */
-export async function registerReferral(newUserId: number, referrerId: number): Promise<boolean> {
+/** True when this telegram id has never interacted with the bot before. */
+export async function isBrandNewUser(telegram_id: number): Promise<boolean> {
+  const { data: u } = await admin()
+    .from("bot_users")
+    .select("telegram_id")
+    .eq("telegram_id", telegram_id)
+    .maybeSingle();
+  if (u) return false;
+  const [logs, usage, pays, ents, members] = await Promise.all([
+    admin().from("search_log").select("id").eq("telegram_id", telegram_id).limit(1),
+    admin().from("search_usage").select("telegram_id").eq("telegram_id", telegram_id).limit(1),
+    admin().from("star_payments").select("id").eq("telegram_user_id", telegram_id).limit(1),
+    admin().from("user_entitlements").select("telegram_id").eq("telegram_id", telegram_id).limit(1),
+    admin().from("group_members").select("user_id").eq("user_id", telegram_id).limit(1),
+  ]);
+  return !(
+    logs.data?.length ||
+    usage.data?.length ||
+    pays.data?.length ||
+    ents.data?.length ||
+    members.data?.length
+  );
+}
+
+/** Register a referral once; grants the referrer +1 permanent daily search.
+ *  Only counts users that have never used the bot before. */
+export async function registerReferral(
+  newUserId: number,
+  referrerId: number,
+  isNewUser: boolean,
+): Promise<boolean> {
   if (!referrerId || referrerId === newUserId) return false;
+  if (!isNewUser) return false;
   await ensureEntitlements(newUserId);
   const e = await getEntitlements(newUserId);
   if (e.referred_by) return false;

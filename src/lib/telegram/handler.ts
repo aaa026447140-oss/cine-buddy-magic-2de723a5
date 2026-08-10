@@ -597,6 +597,8 @@ async function handleMessage(msg: any) {
 
   // Private chat
   if (chat.type !== "private") return;
+  // Must be evaluated BEFORE upsertUser, otherwise everyone looks "new".
+  const isFirstTimeUser = await isBrandNewUser(Number(from.id)).catch(() => false);
   await upsertUser({
     id: Number(from.id),
     username: from.username,

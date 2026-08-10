@@ -96,6 +96,10 @@ import {
   unblockPriceFor,
   saveSupportThread,
   getSupportThreadUser,
+  getSupportTopicId,
+  saveSupportTopic,
+  getSupportTopicUser,
+  deleteSupportTopic,
   type BotSettings,
   type BotUserRow,
 } from "./db";

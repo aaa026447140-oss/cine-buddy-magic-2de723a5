@@ -620,6 +620,27 @@ export type Database = {
         }
         Relationships: []
       }
+      support_topics: {
+        Row: {
+          created_at: string
+          group_chat_id: number
+          telegram_id: number
+          topic_id: number
+        }
+        Insert: {
+          created_at?: string
+          group_chat_id: number
+          telegram_id: number
+          topic_id: number
+        }
+        Update: {
+          created_at?: string
+          group_chat_id?: number
+          telegram_id?: number
+          topic_id?: number
+        }
+        Relationships: []
+      }
       unblock_requests: {
         Row: {
           created_at: string

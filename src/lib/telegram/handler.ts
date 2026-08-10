@@ -664,13 +664,18 @@ async function handleMessage(msg: any) {
   {
     const st0 = await getAdminState(Number(from.id)).catch(() => null);
     if (st0?.state === "awaiting_support_msg") {
-      if (text === "/cancel") {
+      const isCommand =
+        /^\//.test(text.trim()) ||
+        (msg.entities || []).some((e: any) => e.type === "bot_command" && e.offset === 0);
+      if (isCommand) {
+        // A command cancels the pending ticket and is handled normally below.
         await setAdminState(Number(from.id), null).catch(() => {});
-        await sendMessage(chat.id, "❎ בוטל.");
-        return;
+        await sendMessage(chat.id, "❎ הפנייה לאדמין בוטלה.");
+        if (text.trim() === "/cancel") return;
+      } else {
+        await setAdminState(Number(from.id), null).catch(() => {});
+        return await forwardSupportMessage(msg);
       }
-      await setAdminState(Number(from.id), null).catch(() => {});
-      return await forwardSupportMessage(msg);
     }
   }
 

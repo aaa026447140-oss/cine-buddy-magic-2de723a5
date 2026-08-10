@@ -176,7 +176,10 @@ export function requiredChannelsKeyboard(
   return { inline_keyboard: rows };
 }
 
-export function adminPanelKeyboard(isMain: boolean) {
+export function adminPanelKeyboard(
+  isMain: boolean,
+  support?: { hasGroup: boolean; topicsOn: boolean },
+) {
   const rows: any[][] = [
     [{ text: "🎬 ניהול ערוצי סרטים", callback_data: "admin_sources" }],
   ];
@@ -186,6 +189,14 @@ export function adminPanelKeyboard(isMain: boolean) {
   rows.push([{ text: "🔎 הגדרת קבוצת חיפוש", callback_data: "admin_set_search_group" }]);
   if (isMain) {
     rows.push([{ text: "📮 הגדרת קבוצת פניות", callback_data: "admin_support_group" }]);
+    if (support?.hasGroup) {
+      rows.push([
+        {
+          text: support.topicsOn ? "🧵 מצב נושאים: פעיל (כבה)" : "🧵 מצב נושאים: כבוי (הפעל)",
+          callback_data: "admin_topics_toggle",
+        },
+      ]);
+    }
   }
   rows.push([{ text: "🎟️ ניהול חיפושים ומחירים", callback_data: "admin_quota" }]);
   rows.push([{ text: "⭐ תומכים בכוכבים", callback_data: "admin_sup:0" }]);

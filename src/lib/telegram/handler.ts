@@ -4,6 +4,7 @@ import {
   copyMessage,
   editMessageText,
   getChat,
+  createForumTopic,
   getChatMember,
   getChatMemberCount,
   pinChatMessage,

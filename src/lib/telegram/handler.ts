@@ -98,6 +98,8 @@ import {
   saveSupportThread,
   getSupportThreadUser,
   getSupportTopicId,
+  listSupportUsers,
+  clearSupportTopics,
   saveSupportTopic,
   getSupportTopicUser,
   deleteSupportTopic,
@@ -806,6 +808,8 @@ function blockedNoticeText(u: { blocked_until?: string | null; block_reason?: st
  * contact group. Returns null when the group is not in topics mode.
  */
 async function ensureSupportTopic(gid: number, from: any): Promise<number | null> {
+  const s = await getSettings().catch(() => null);
+  if (!s?.support_topics_enabled) return null;
   const chat: any = await getChat(gid).catch(() => null);
   if (!chat?.is_forum) return null;
   const uid = Number(from.id);
@@ -885,7 +889,8 @@ async function handleSupportGroupMessage(msg: any) {
   const replyTo = msg.reply_to_message;
   const threadId = Number(msg.message_thread_id || 0);
   // Topics mode: every message inside a user's topic goes straight to them.
-  const topicUser = threadId
+  const cfg = await getSettings().catch(() => null);
+  const topicUser = threadId && cfg?.support_topics_enabled
     ? await getSupportTopicUser(Number(msg.chat.id), threadId).catch(() => null)
     : null;
   if (!replyTo && !topicUser) {
@@ -1149,7 +1154,13 @@ async function sendAdminPanel(chatId: number, userId?: number) {
     `👤 משתמשים: <b>${s.users.toLocaleString()}</b>\n` +
     `👥 קבוצות: <b>${s.groups.toLocaleString()}</b>\n` +
     `⭐ סה״כ כוכבים: <b>${s.totalStars.toLocaleString()}</b>`;
-  await sendMessage(chatId, text, { reply_markup: adminPanelKeyboard(main) });
+  const cfg = await getSettings().catch(() => null);
+  await sendMessage(chatId, text, {
+    reply_markup: adminPanelKeyboard(main, {
+      hasGroup: !!cfg?.support_group_id,
+      topicsOn: !!cfg?.support_topics_enabled,
+    }),
+  });
 }
 
 // ───── Search & pagination ─────
@@ -1717,10 +1728,66 @@ async function handleAdminCallback(cq: any, data: string) {
   }
 
   switch (data) {
-    case "admin_open":
+    case "admin_open": {
+      const cfg = await getSettings().catch(() => null);
       return await editMessageText(chatId, messageId, `⚙️ <b>לוח אדמין</b>${main ? "" : " (זמני)"}`, {
-        reply_markup: adminPanelKeyboard(main),
+        reply_markup: adminPanelKeyboard(main, {
+          hasGroup: !!cfg?.support_group_id,
+          topicsOn: !!cfg?.support_topics_enabled,
+        }),
       }).catch(() => {});
+    }
+    case "admin_topics_toggle": {
+      if (!main) return;
+      const cfg = await getSettings();
+      const gid = Number(cfg.support_group_id || 0);
+      if (!gid) return;
+      const next = !cfg.support_topics_enabled;
+      if (next) {
+        const chat: any = await getChat(gid).catch(() => null);
+        if (!chat?.is_forum) {
+          return await editMessageText(
+            chatId,
+            messageId,
+            "❌ קבוצת הפניות אינה במצב נושאים (Topics). הפעל «Topics» בהגדרות הקבוצה בטלגרם ונסה שוב.",
+            { reply_markup: { inline_keyboard: [[{ text: "« חזרה", callback_data: "admin_open" }]] } },
+          ).catch(() => {});
+        }
+        await updateSettings({ support_topics_enabled: true } as any);
+        await editMessageText(chatId, messageId, "🧵 מפעיל מצב נושאים וממיין את כל השיחות...", {
+          reply_markup: { inline_keyboard: [[{ text: "« חזרה", callback_data: "admin_open" }]] },
+        }).catch(() => {});
+        const users = await listSupportUsers(gid).catch(() => [] as number[]);
+        let created = 0;
+        for (const uid of users) {
+          const existing = await getSupportTopicId(gid, uid).catch(() => null);
+          if (existing) continue;
+          const u = await getBotUser(uid).catch(() => null);
+          const tid = await ensureSupportTopic(gid, {
+            id: uid,
+            first_name: (u as any)?.first_name,
+            last_name: (u as any)?.last_name,
+            username: (u as any)?.username,
+          });
+          if (tid) created++;
+          await new Promise((r) => setTimeout(r, 400));
+        }
+        return await editMessageText(
+          chatId,
+          messageId,
+          `✅ מצב נושאים <b>הופעל</b>.\nנפתחו ${created} נושאים חדשים (סה״כ ${users.length} משתמשים ידועים).`,
+          { reply_markup: { inline_keyboard: [[{ text: "« חזרה", callback_data: "admin_open" }]] } },
+        ).catch(() => {});
+      }
+      await updateSettings({ support_topics_enabled: false } as any);
+      await clearSupportTopics(gid).catch(() => {});
+      return await editMessageText(
+        chatId,
+        messageId,
+        "✅ מצב נושאים <b>כובה</b>. הפניות יגיעו כרגיל לצ׳אט הראשי של הקבוצה (מענה בתגובה להודעה).",
+        { reply_markup: { inline_keyboard: [[{ text: "« חזרה", callback_data: "admin_open" }]] } },
+      ).catch(() => {});
+    }
     case "admin_close":
       return await tg("deleteMessage", { chat_id: chatId, message_id: messageId }).catch(() => {});
     case "admin_stats": {

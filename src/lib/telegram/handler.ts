@@ -1146,8 +1146,6 @@ async function sendGroupPurchasePrompt(chatId: number, cmd: string) {
 }
 
 async function sendPurchaseInvoice(chatId: number, userId: number, kind: BuyKind) {
-  const s0 = await getSettings();
-  void s0;
   const s = await getSettings();
   const item = purchaseCatalog(s)[kind];
   if (!item) return;
@@ -1165,6 +1163,34 @@ async function sendPurchaseInvoice(chatId: number, userId: number, kind: BuyKind
     prices: [{ label: `${item.amount} Stars`, amount: item.amount }],
   }).catch((e: any) => {
     console.error("sendInvoice failed:", e?.message);
+    sendMessage(chatId, "❌ לא הצלחתי לפתוח חלון תשלום. נסה שוב מאוחר יותר.");
+  });
+}
+
+/** Group premium: unlimited searches for everyone inside one specific group. */
+async function sendGroupPremiumInvoice(chatId: number, userId: number, groupId: number) {
+  const s = await getSettings();
+  if (!s.enable_group_premium) {
+    await sendMessage(chatId, "🚫 פרימיום לקבוצה אינו זמין כרגע.").catch(() => {});
+    return;
+  }
+  const g = await getGroupRow(groupId).catch(() => null);
+  if (await isGroupPremium(groupId).catch(() => false)) {
+    await sendMessage(chatId, `✅ לקבוצה <b>${escapeHtml(g?.title || String(groupId))}</b> כבר יש פרימיום — חיפושים ללא הגבלה.`).catch(() => {});
+    return;
+  }
+  const amount = Math.max(1, Number(s.price_group_premium || 0));
+  await sendInvoice({
+    chat_id: chatId,
+    title: "פרימיום לקבוצה — ללא הגבלה",
+    description:
+      `חיפושים ללא הגבלה לכל המשתמשים בקבוצה «${g?.title || groupId}».\n` +
+      `שימו לב: זה לא מעניק פרימיום בצ׳אט הפרטי — החיפושים בפרטי נשארים לפי המכסה הרגילה.`,
+    payload: `gbuy:${groupId}:${userId}:${Date.now()}`,
+    currency: "XTR",
+    prices: [{ label: `${amount} Stars`, amount }],
+  }).catch((e: any) => {
+    console.error("group sendInvoice failed:", e?.message);
     sendMessage(chatId, "❌ לא הצלחתי לפתוח חלון תשלום. נסה שוב מאוחר יותר.");
   });
 }

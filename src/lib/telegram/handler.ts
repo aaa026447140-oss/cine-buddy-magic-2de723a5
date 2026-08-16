@@ -2967,6 +2967,74 @@ async function grantPremiumAndNotify(adminChatId: number, tid: number, days: num
 }
 
 async function renderPremiumMembers(chatId: number, messageId: number, page: number) {
+  return await _renderPremiumMembers(chatId, messageId, page);
+}
+
+// ───── Group premium admin ─────
+const GROUP_PAGE_SIZE = 10;
+
+async function renderGroupPremiumList(chatId: number, messageId: number, page: number) {
+  const { rows, total } = await listGroupsPaged({ page, pageSize: GROUP_PAGE_SIZE });
+  const totalPages = Math.max(1, Math.ceil(total / GROUP_PAGE_SIZE));
+  const active = (g: { is_premium: boolean; premium_until: string | null }) =>
+    g.is_premium && (!g.premium_until || new Date(g.premium_until).getTime() > Date.now());
+  const kb: any[][] = rows.map((g) => [
+    {
+      text: `${active(g) ? "👑 " : "▫️ "}${truncateBtn(g.title || String(g.chat_id), 34)}${
+        active(g) && g.premium_until ? ` · ${fmtDay(g.premium_until)}` : ""
+      }`,
+      callback_data: `admin_gpremu_${g.chat_id}`,
+    },
+  ]);
+  const nav: any[] = [];
+  if (page > 0) nav.push({ text: "⬅️ הקודם", callback_data: `admin_gprem:${page - 1}` });
+  nav.push({ text: `${page + 1}/${totalPages}`, callback_data: "noop" });
+  if (page < totalPages - 1) nav.push({ text: "הבא ➡️", callback_data: `admin_gprem:${page + 1}` });
+  if (nav.length > 1) kb.push(nav);
+  kb.push([{ text: "« חזרה", callback_data: "admin_quota" }]);
+  await editMessageText(
+    chatId,
+    messageId,
+    `👥 <b>פרימיום לקבוצות</b>\nסה״כ קבוצות: <b>${total.toLocaleString()}</b> · עמוד ${page + 1}/${totalPages}\n\n` +
+      `פרימיום לקבוצה = חיפושים ללא הגבלה בתוך הקבוצה בלבד (לא בפרטי).\n` +
+      (rows.length ? "לחץ על קבוצה כדי לנהל אותה." : "<i>אין קבוצות פעילות.</i>"),
+    { reply_markup: { inline_keyboard: kb } },
+  ).catch(() => {});
+}
+
+async function renderGroupPremiumView(chatId: number, messageId: number, gid: number) {
+  const g = await getGroupRow(gid).catch(() => null);
+  const isPrem = await isGroupPremium(gid).catch(() => false);
+  const text =
+    `👥 <b>${escapeHtml(g?.title || String(gid))}</b>\n` +
+    `🆔 <code>${gid}</code>\n\n` +
+    `סטטוס: <b>${isPrem ? "👑 פרימיום פעיל" : "רגיל"}</b>\n` +
+    (isPrem ? `📅 בתוקף עד: <b>${g?.premium_until ? fmtDay(g.premium_until) : "ללא תאריך סיום"}</b>\n` : "") +
+    `\nℹ️ פרימיום לקבוצה מבטל את מגבלת החיפושים בקבוצה הזו בלבד. משתמשים עדיין מקבלים את הסרט בפרטי, וללא חיפושים נוספים בפרטי.`;
+  const kb: any[][] = [
+    [{ text: isPrem ? "➕ הארך/שנה פרימיום" : "👑 העניק פרימיום לקבוצה", callback_data: `admin_gpremdur_${gid}` }],
+  ];
+  if (isPrem) kb.push([{ text: "🚫 הסר פרימיום מהקבוצה", callback_data: `admin_gpremoff_${gid}` }]);
+  kb.push([{ text: "« חזרה לרשימה", callback_data: "admin_gprem:0" }]);
+  await editMessageText(chatId, messageId, text, { reply_markup: { inline_keyboard: kb } }).catch(() => {});
+}
+
+async function renderGroupPremiumDurations(chatId: number, messageId: number, gid: number) {
+  const opts = [
+    { label: "7 ימים", days: 7 },
+    { label: "30 ימים", days: 30 },
+    { label: "90 ימים", days: 90 },
+    { label: "שנה (365)", days: 365 },
+  ];
+  const rows: any[][] = opts.map((o) => [{ text: o.label, callback_data: `admin_gpremgive:${gid}:${o.days}` }]);
+  rows.push([{ text: "♾️ לנצח (ללא תאריך סיום)", callback_data: `admin_gpremgive:${gid}:0` }]);
+  rows.push([{ text: "« חזרה", callback_data: `admin_gpremu_${gid}` }]);
+  await editMessageText(chatId, messageId, "👑 בחר לכמה זמן להעניק פרימיום לקבוצה:", {
+    reply_markup: { inline_keyboard: rows },
+  }).catch(() => {});
+}
+
+async function _renderPremiumMembers(chatId: number, messageId: number, page: number) {
   const { rows, total } = await listPremiumMembersPaged({ page, pageSize: PREMIUM_PAGE_SIZE });
   const totalPages = Math.max(1, Math.ceil(total / PREMIUM_PAGE_SIZE));
   const kb: any[][] = rows.map((u) => [

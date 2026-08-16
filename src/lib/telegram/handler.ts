@@ -360,6 +360,7 @@ function quotaAdminText(s: BotSettings): string {
     `💎 פרימיום לחודש: <b>${s.price_premium}</b> ⭐ ${s.enable_premium ? "🟢" : "🔴"}\n` +
     `🏆 פרימיום לשנה: <b>${s.price_premium_year}</b> ⭐ ${s.enable_premium_year ? "🟢" : "🔴"}\n` +
     `♾️ פרימיום לנצח: <b>${s.price_premium_forever}</b> ⭐ ${s.enable_premium_forever ? "🟢" : "🔴"}\n\n` +
+    `👥 פרימיום לקבוצה (חיפושים ללא הגבלה בקבוצה): <b>${s.price_group_premium}</b> ⭐ ${s.enable_group_premium ? "🟢" : "🔴"}\n\n` +
     `🎁 כל משתמש חדש שמצטרף דרך קישור ההזמנה מוסיף למזמין +1 חיפוש בכל יום.`
   );
 }

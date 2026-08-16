@@ -86,7 +86,12 @@ export function quotaAdminKeyboard(s: BotSettings) {
         { text: `♾️ פרימיום לנצח: ${s.price_premium_forever} ⭐`, callback_data: "admin_q_p_forever" },
         { text: sw(s.enable_premium_forever), callback_data: "admin_q_t_forever" },
       ],
+      [
+        { text: `👥 פרימיום לקבוצה: ${s.price_group_premium} ⭐`, callback_data: "admin_q_p_group" },
+        { text: sw(s.enable_group_premium), callback_data: "admin_q_t_group" },
+      ],
       [{ text: "💎 ניהול פרימיום למשתמשים", callback_data: "admin_prem:recent:0" }],
+      [{ text: "👥 ניהול פרימיום לקבוצות", callback_data: "admin_gprem:0" }],
       [{ text: "♻️ אפס את המכסה היומית לכולם", callback_data: "admin_q_reset" }],
       [{ text: "« חזרה", callback_data: "admin_open" }],
     ],

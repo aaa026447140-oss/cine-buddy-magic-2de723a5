@@ -49,6 +49,10 @@ import {
   listAdmins,
   listGroups,
   listGroupsDetailed,
+  listGroupsPaged,
+  getGroupRow,
+  isGroupPremium,
+  setGroupPremium,
   listSourceChannels,
   listUsers,
   markGroupInactive,
@@ -271,6 +275,8 @@ async function allowSearch(
 ): Promise<boolean> {
   if (!settings.quota_enabled) return true;
   if (await isAdmin(userId)) return true;
+  // Group premium: unlimited searches inside that group (does not affect private quota).
+  if (inGroup && (await isGroupPremium(chatId).catch(() => false))) return true;
   const ent = await getEntitlements(userId).catch(() => null);
   if (ent?.is_premium) return true;
   const limit = Math.max(0, Number(settings.free_searches_per_day || 0)) + (ent?.bonus_daily ?? 0);
@@ -278,12 +284,21 @@ async function allowSearch(
   if (res.allowed) return true;
   const me = await getMe();
   if (inGroup) {
+    const gpRows: any[][] = [[{ text: "🎟️ קבל עוד חיפושים", url: `https://t.me/${me.username}?start=quota` }]];
+    if (settings.enable_group_premium) {
+      gpRows.push([
+        {
+          text: `👥 פרימיום לקבוצה — ללא הגבלה · ${settings.price_group_premium} ⭐`,
+          url: `https://t.me/${me.username}?start=gp_${String(chatId).replace("-", "n")}`,
+        },
+      ]);
+    }
     await sendMessage(
       chatId,
       `⏳ נגמרו לך החיפושים החינמיים להיום (${limit}).\nפתח את הבוט בפרטי כדי לקבל עוד חיפושים.`,
       {
         reply_to_message_id: replyToMessageId,
-        reply_markup: { inline_keyboard: [[{ text: "🎟️ קבל עוד חיפושים", url: `https://t.me/${me.username}?start=quota` }]] },
+        reply_markup: { inline_keyboard: gpRows },
       } as any,
     ).catch(() => {});
     return false;
@@ -356,6 +371,7 @@ function quotaAdminText(s: BotSettings): string {
     `💎 פרימיום לחודש: <b>${s.price_premium}</b> ⭐ ${s.enable_premium ? "🟢" : "🔴"}\n` +
     `🏆 פרימיום לשנה: <b>${s.price_premium_year}</b> ⭐ ${s.enable_premium_year ? "🟢" : "🔴"}\n` +
     `♾️ פרימיום לנצח: <b>${s.price_premium_forever}</b> ⭐ ${s.enable_premium_forever ? "🟢" : "🔴"}\n\n` +
+    `👥 פרימיום לקבוצה (חיפושים ללא הגבלה בקבוצה): <b>${s.price_group_premium}</b> ⭐ ${s.enable_group_premium ? "🟢" : "🔴"}\n\n` +
     `🎁 כל משתמש חדש שמצטרף דרך קישור ההזמנה מוסיף למזמין +1 חיפוש בכל יום.`
   );
 }
@@ -651,6 +667,21 @@ async function handleMessage(msg: any) {
       }
       return;
     }
+    if (payload.startsWith("gbuy:")) {
+      const gid = Number(payload.split(":")[1]);
+      if (Number.isFinite(gid)) {
+        await setGroupPremium(gid, true, null).catch(() => {});
+        const g = await getGroupRow(gid).catch(() => null);
+        await sendMessage(
+          chat.id,
+          `👥 <b>פרימיום לקבוצה הופעל!</b>\n\nהקבוצה <b>${escapeHtml(g?.title || String(gid))}</b> מקבלת מעכשיו חיפושים ללא הגבלה.\n` +
+            `ℹ️ שים לב: החיפושים בצ׳אט הפרטי נשארים לפי המכסה הרגילה. תודה! ❤️`,
+        ).catch(() => {});
+        await sendMessage(gid, "👥 <b>הקבוצה קיבלה פרימיום!</b>\nמעכשיו החיפושים בקבוצה הזו ללא הגבלה 🎉").catch(() => {});
+        await sendMessage(ADMIN_ID, `👥 נרכש פרימיום לקבוצה <code>${gid}</code> (${sp.total_amount} ⭐) על ידי <code>${from.id}</code>.`).catch(() => {});
+      }
+      return;
+    }
     if (payload.startsWith("unblock:")) {
       const reqId = Number(payload.split(":")[1]);
       await releaseUserAfterPayment(Number(from.id)).catch(() => {});
@@ -744,6 +775,11 @@ async function handleMessage(msg: any) {
     }
     if (payload === "quota") {
       return await sendQuotaMenu(chat.id, Number(from.id));
+    }
+    if (payload.startsWith("gp_")) {
+      const gid = Number(payload.slice(3).replace(/^n/, "-"));
+      if (Number.isFinite(gid)) return await sendGroupPremiumInvoice(chat.id, Number(from.id), gid);
+      return await sendStartMenu(chat.id, Number(from.id));
     }
     if (payload === "contact") {
       const s = await getSettings();
@@ -1119,7 +1155,17 @@ async function sendGroupPurchasePrompt(chatId: number, cmd: string) {
   }
   await sendMessage(chatId, `${label}\n\nהתשלום מתבצע בצ׳אט הפרטי עם הבוט 👇`, {
     reply_markup: {
-      inline_keyboard: [[{ text: "המשך בצ׳אט הפרטי", url: `https://t.me/${me.username}?start=${payload}` }]],
+      inline_keyboard: [
+        [{ text: "המשך בצ׳אט הפרטי", url: `https://t.me/${me.username}?start=${payload}` }],
+        ...(chatId < 0 && (await getSettings()).enable_group_premium
+          ? [[
+              {
+                text: `👥 פרימיום לקבוצה — ללא הגבלה · ${(await getSettings()).price_group_premium} ⭐`,
+                url: `https://t.me/${me.username}?start=gp_${String(chatId).replace("-", "n")}`,
+              },
+            ]]
+          : []),
+      ],
     },
   });
 }
@@ -1142,6 +1188,34 @@ async function sendPurchaseInvoice(chatId: number, userId: number, kind: BuyKind
     prices: [{ label: `${item.amount} Stars`, amount: item.amount }],
   }).catch((e: any) => {
     console.error("sendInvoice failed:", e?.message);
+    sendMessage(chatId, "❌ לא הצלחתי לפתוח חלון תשלום. נסה שוב מאוחר יותר.");
+  });
+}
+
+/** Group premium: unlimited searches for everyone inside one specific group. */
+async function sendGroupPremiumInvoice(chatId: number, userId: number, groupId: number) {
+  const s = await getSettings();
+  if (!s.enable_group_premium) {
+    await sendMessage(chatId, "🚫 פרימיום לקבוצה אינו זמין כרגע.").catch(() => {});
+    return;
+  }
+  const g = await getGroupRow(groupId).catch(() => null);
+  if (await isGroupPremium(groupId).catch(() => false)) {
+    await sendMessage(chatId, `✅ לקבוצה <b>${escapeHtml(g?.title || String(groupId))}</b> כבר יש פרימיום — חיפושים ללא הגבלה.`).catch(() => {});
+    return;
+  }
+  const amount = Math.max(1, Number(s.price_group_premium || 0));
+  await sendInvoice({
+    chat_id: chatId,
+    title: "פרימיום לקבוצה — ללא הגבלה",
+    description:
+      `חיפושים ללא הגבלה לכל המשתמשים בקבוצה «${g?.title || groupId}».\n` +
+      `שימו לב: זה לא מעניק פרימיום בצ׳אט הפרטי — החיפושים בפרטי נשארים לפי המכסה הרגילה.`,
+    payload: `gbuy:${groupId}:${userId}:${Date.now()}`,
+    currency: "XTR",
+    prices: [{ label: `${amount} Stars`, amount }],
+  }).catch((e: any) => {
+    console.error("group sendInvoice failed:", e?.message);
     sendMessage(chatId, "❌ לא הצלחתי לפתוח חלון תשלום. נסה שוב מאוחר יותר.");
   });
 }
@@ -1699,6 +1773,7 @@ async function handleAdminCallback(cq: any, data: string) {
       admin_q_t_premium: "enable_premium",
       admin_q_t_year: "enable_premium_year",
       admin_q_t_forever: "enable_premium_forever",
+      admin_q_t_group: "enable_group_premium",
     };
     if (toggles[data]) {
       const field = toggles[data]!;
@@ -1720,6 +1795,7 @@ async function handleAdminCallback(cq: any, data: string) {
       admin_q_p_premium: "💎 שלח את המחיר בכוכבים לפרימיום (ללא הגבלה):",
       admin_q_p_year: "🏆 שלח את המחיר בכוכבים לפרימיום לשנה:",
       admin_q_p_forever: "♾️ שלח את המחיר בכוכבים לפרימיום לנצח:",
+      admin_q_p_group: "👥 שלח את המחיר בכוכבים לפרימיום לקבוצה (חיפושים ללא הגבלה בקבוצה):",
     };
     if (prompts[data]) {
       await setAdminState(Number(userId), data);
@@ -2068,6 +2144,38 @@ async function handleAdminCallback(cq: any, data: string) {
     const page = Math.max(0, Number(data.split(":")[1]) || 0);
     return await renderPremiumMembers(chatId, messageId, page);
   }
+  if (data.startsWith("admin_gprem:")) {
+    const page = Math.max(0, Number(data.split(":")[1]) || 0);
+    return await renderGroupPremiumList(chatId, messageId, page);
+  }
+  if (data.startsWith("admin_gpremu_")) {
+    const gid = Number(data.slice("admin_gpremu_".length));
+    if (Number.isFinite(gid)) return await renderGroupPremiumView(chatId, messageId, gid);
+  }
+  if (data.startsWith("admin_gpremdur_")) {
+    const gid = Number(data.slice("admin_gpremdur_".length));
+    if (Number.isFinite(gid)) return await renderGroupPremiumDurations(chatId, messageId, gid);
+  }
+  if (data.startsWith("admin_gpremgive:")) {
+    const [, idText, daysText] = data.split(":");
+    const gid = Number(idText);
+    const days = Number(daysText);
+    if (Number.isFinite(gid) && Number.isFinite(days)) {
+      const until = await setGroupPremium(gid, true, days > 0 ? days : null).catch(() => null);
+      await sendMessage(
+        gid,
+        `👥 <b>הקבוצה קיבלה פרימיום מהמנהל!</b>\nחיפושים ללא הגבלה בקבוצה${until ? ` עד <b>${fmtDay(until)}</b>` : " — ללא תאריך סיום"}.`,
+      ).catch(() => {});
+      return await renderGroupPremiumView(chatId, messageId, gid);
+    }
+  }
+  if (data.startsWith("admin_gpremoff_")) {
+    const gid = Number(data.slice("admin_gpremoff_".length));
+    if (Number.isFinite(gid)) {
+      await setGroupPremium(gid, false).catch(() => {});
+      return await renderGroupPremiumView(chatId, messageId, gid);
+    }
+  }
   if (data.startsWith("admin_dm_")) {
     const tid = Number(data.slice("admin_dm_".length));
     if (Number.isFinite(tid)) {
@@ -2264,6 +2372,7 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
         admin_q_p_premium: "price_premium",
         admin_q_p_year: "price_premium_year",
         admin_q_p_forever: "price_premium_forever",
+        admin_q_p_group: "price_group_premium",
       };
       const field = fields[st.state] || "price_premium";
       await updateSettings({ [field]: Math.max(0, n) } as any);
@@ -2868,6 +2977,74 @@ async function grantPremiumAndNotify(adminChatId: number, tid: number, days: num
 }
 
 async function renderPremiumMembers(chatId: number, messageId: number, page: number) {
+  return await _renderPremiumMembers(chatId, messageId, page);
+}
+
+// ───── Group premium admin ─────
+const GROUP_PAGE_SIZE = 10;
+
+async function renderGroupPremiumList(chatId: number, messageId: number, page: number) {
+  const { rows, total } = await listGroupsPaged({ page, pageSize: GROUP_PAGE_SIZE });
+  const totalPages = Math.max(1, Math.ceil(total / GROUP_PAGE_SIZE));
+  const active = (g: { is_premium: boolean; premium_until: string | null }) =>
+    g.is_premium && (!g.premium_until || new Date(g.premium_until).getTime() > Date.now());
+  const kb: any[][] = rows.map((g) => [
+    {
+      text: `${active(g) ? "👑 " : "▫️ "}${truncateBtn(g.title || String(g.chat_id), 34)}${
+        active(g) && g.premium_until ? ` · ${fmtDay(g.premium_until)}` : ""
+      }`,
+      callback_data: `admin_gpremu_${g.chat_id}`,
+    },
+  ]);
+  const nav: any[] = [];
+  if (page > 0) nav.push({ text: "⬅️ הקודם", callback_data: `admin_gprem:${page - 1}` });
+  nav.push({ text: `${page + 1}/${totalPages}`, callback_data: "noop" });
+  if (page < totalPages - 1) nav.push({ text: "הבא ➡️", callback_data: `admin_gprem:${page + 1}` });
+  if (nav.length > 1) kb.push(nav);
+  kb.push([{ text: "« חזרה", callback_data: "admin_quota" }]);
+  await editMessageText(
+    chatId,
+    messageId,
+    `👥 <b>פרימיום לקבוצות</b>\nסה״כ קבוצות: <b>${total.toLocaleString()}</b> · עמוד ${page + 1}/${totalPages}\n\n` +
+      `פרימיום לקבוצה = חיפושים ללא הגבלה בתוך הקבוצה בלבד (לא בפרטי).\n` +
+      (rows.length ? "לחץ על קבוצה כדי לנהל אותה." : "<i>אין קבוצות פעילות.</i>"),
+    { reply_markup: { inline_keyboard: kb } },
+  ).catch(() => {});
+}
+
+async function renderGroupPremiumView(chatId: number, messageId: number, gid: number) {
+  const g = await getGroupRow(gid).catch(() => null);
+  const isPrem = await isGroupPremium(gid).catch(() => false);
+  const text =
+    `👥 <b>${escapeHtml(g?.title || String(gid))}</b>\n` +
+    `🆔 <code>${gid}</code>\n\n` +
+    `סטטוס: <b>${isPrem ? "👑 פרימיום פעיל" : "רגיל"}</b>\n` +
+    (isPrem ? `📅 בתוקף עד: <b>${g?.premium_until ? fmtDay(g.premium_until) : "ללא תאריך סיום"}</b>\n` : "") +
+    `\nℹ️ פרימיום לקבוצה מבטל את מגבלת החיפושים בקבוצה הזו בלבד. משתמשים עדיין מקבלים את הסרט בפרטי, וללא חיפושים נוספים בפרטי.`;
+  const kb: any[][] = [
+    [{ text: isPrem ? "➕ הארך/שנה פרימיום" : "👑 העניק פרימיום לקבוצה", callback_data: `admin_gpremdur_${gid}` }],
+  ];
+  if (isPrem) kb.push([{ text: "🚫 הסר פרימיום מהקבוצה", callback_data: `admin_gpremoff_${gid}` }]);
+  kb.push([{ text: "« חזרה לרשימה", callback_data: "admin_gprem:0" }]);
+  await editMessageText(chatId, messageId, text, { reply_markup: { inline_keyboard: kb } }).catch(() => {});
+}
+
+async function renderGroupPremiumDurations(chatId: number, messageId: number, gid: number) {
+  const opts = [
+    { label: "7 ימים", days: 7 },
+    { label: "30 ימים", days: 30 },
+    { label: "90 ימים", days: 90 },
+    { label: "שנה (365)", days: 365 },
+  ];
+  const rows: any[][] = opts.map((o) => [{ text: o.label, callback_data: `admin_gpremgive:${gid}:${o.days}` }]);
+  rows.push([{ text: "♾️ לנצח (ללא תאריך סיום)", callback_data: `admin_gpremgive:${gid}:0` }]);
+  rows.push([{ text: "« חזרה", callback_data: `admin_gpremu_${gid}` }]);
+  await editMessageText(chatId, messageId, "👑 בחר לכמה זמן להעניק פרימיום לקבוצה:", {
+    reply_markup: { inline_keyboard: rows },
+  }).catch(() => {});
+}
+
+async function _renderPremiumMembers(chatId: number, messageId: number, page: number) {
   const { rows, total } = await listPremiumMembersPaged({ page, pageSize: PREMIUM_PAGE_SIZE });
   const totalPages = Math.max(1, Math.ceil(total / PREMIUM_PAGE_SIZE));
   const kb: any[][] = rows.map((u) => [

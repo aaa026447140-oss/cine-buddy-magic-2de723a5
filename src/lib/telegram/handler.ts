@@ -761,6 +761,11 @@ async function handleMessage(msg: any) {
     if (payload === "quota") {
       return await sendQuotaMenu(chat.id, Number(from.id));
     }
+    if (payload.startsWith("gp_")) {
+      const gid = Number(payload.slice(3).replace(/^n/, "-"));
+      if (Number.isFinite(gid)) return await sendGroupPremiumInvoice(chat.id, Number(from.id), gid);
+      return await sendStartMenu(chat.id, Number(from.id));
+    }
     if (payload === "contact") {
       const s = await getSettings();
       if (!s.support_group_id) {

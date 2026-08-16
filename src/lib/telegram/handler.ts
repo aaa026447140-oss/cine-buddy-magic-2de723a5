@@ -1704,6 +1704,7 @@ async function handleAdminCallback(cq: any, data: string) {
       admin_q_t_premium: "enable_premium",
       admin_q_t_year: "enable_premium_year",
       admin_q_t_forever: "enable_premium_forever",
+      admin_q_t_group: "enable_group_premium",
     };
     if (toggles[data]) {
       const field = toggles[data]!;
@@ -1725,6 +1726,7 @@ async function handleAdminCallback(cq: any, data: string) {
       admin_q_p_premium: "💎 שלח את המחיר בכוכבים לפרימיום (ללא הגבלה):",
       admin_q_p_year: "🏆 שלח את המחיר בכוכבים לפרימיום לשנה:",
       admin_q_p_forever: "♾️ שלח את המחיר בכוכבים לפרימיום לנצח:",
+      admin_q_p_group: "👥 שלח את המחיר בכוכבים לפרימיום לקבוצה (חיפושים ללא הגבלה בקבוצה):",
     };
     if (prompts[data]) {
       await setAdminState(Number(userId), data);
@@ -2269,6 +2271,7 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
         admin_q_p_premium: "price_premium",
         admin_q_p_year: "price_premium_year",
         admin_q_p_forever: "price_premium_forever",
+        admin_q_p_group: "price_group_premium",
       };
       const field = fields[st.state] || "price_premium";
       await updateSettings({ [field]: Math.max(0, n) } as any);

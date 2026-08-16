@@ -2134,6 +2134,38 @@ async function handleAdminCallback(cq: any, data: string) {
     const page = Math.max(0, Number(data.split(":")[1]) || 0);
     return await renderPremiumMembers(chatId, messageId, page);
   }
+  if (data.startsWith("admin_gprem:")) {
+    const page = Math.max(0, Number(data.split(":")[1]) || 0);
+    return await renderGroupPremiumList(chatId, messageId, page);
+  }
+  if (data.startsWith("admin_gpremu_")) {
+    const gid = Number(data.slice("admin_gpremu_".length));
+    if (Number.isFinite(gid)) return await renderGroupPremiumView(chatId, messageId, gid);
+  }
+  if (data.startsWith("admin_gpremdur_")) {
+    const gid = Number(data.slice("admin_gpremdur_".length));
+    if (Number.isFinite(gid)) return await renderGroupPremiumDurations(chatId, messageId, gid);
+  }
+  if (data.startsWith("admin_gpremgive:")) {
+    const [, idText, daysText] = data.split(":");
+    const gid = Number(idText);
+    const days = Number(daysText);
+    if (Number.isFinite(gid) && Number.isFinite(days)) {
+      const until = await setGroupPremium(gid, true, days > 0 ? days : null).catch(() => null);
+      await sendMessage(
+        gid,
+        `👥 <b>הקבוצה קיבלה פרימיום מהמנהל!</b>\nחיפושים ללא הגבלה בקבוצה${until ? ` עד <b>${fmtDay(until)}</b>` : " — ללא תאריך סיום"}.`,
+      ).catch(() => {});
+      return await renderGroupPremiumView(chatId, messageId, gid);
+    }
+  }
+  if (data.startsWith("admin_gpremoff_")) {
+    const gid = Number(data.slice("admin_gpremoff_".length));
+    if (Number.isFinite(gid)) {
+      await setGroupPremium(gid, false).catch(() => {});
+      return await renderGroupPremiumView(chatId, messageId, gid);
+    }
+  }
   if (data.startsWith("admin_dm_")) {
     const tid = Number(data.slice("admin_dm_".length));
     if (Number.isFinite(tid)) {

@@ -823,6 +823,108 @@ export async function listGroupsDetailed(): Promise<{ chat_id: number; title: st
 }
 
 export async function listUsers(): Promise<number[]> {
+  return _listUsers();
+}
+
+// ───── Group premium (unlimited searches inside a specific group) ─────
+export interface GroupRow {
+  chat_id: number;
+  title: string | null;
+  is_premium: boolean;
+  premium_until: string | null;
+}
+
+/** True when the group currently has an active premium (forever or not expired). */
+export async function isGroupPremium(chat_id: number): Promise<boolean> {
+  const { data } = await admin()
+    .from("bot_groups")
+    .select("is_premium,premium_until")
+    .eq("chat_id", chat_id)
+    .maybeSingle();
+  const g = data as any;
+  if (!g?.is_premium) return false;
+  if (!g.premium_until) return true;
+  if (new Date(g.premium_until).getTime() > Date.now()) return true;
+  await admin()
+    .from("bot_groups")
+    .update({ is_premium: false, premium_until: null })
+    .eq("chat_id", chat_id);
+  return false;
+}
+
+/**
+ * Grants or removes group premium. `days = null` means forever; extending an
+ * active period adds the days on top of the remaining time.
+ */
+export async function setGroupPremium(
+  chat_id: number,
+  on: boolean,
+  days: number | null = null,
+): Promise<string | null> {
+  if (!on) {
+    await admin().from("bot_groups").update({ is_premium: false, premium_until: null }).eq("chat_id", chat_id);
+    return null;
+  }
+  let until: string | null = null;
+  if (days && days > 0) {
+    const { data } = await admin()
+      .from("bot_groups")
+      .select("is_premium,premium_until")
+      .eq("chat_id", chat_id)
+      .maybeSingle();
+    const cur = (data as any)?.premium_until as string | null | undefined;
+    const base =
+      (data as any)?.is_premium && cur && new Date(cur).getTime() > Date.now()
+        ? new Date(cur).getTime()
+        : Date.now();
+    until = new Date(base + days * 86_400_000).toISOString();
+  }
+  await admin().from("bot_groups").update({ is_premium: true, premium_until: until }).eq("chat_id", chat_id);
+  return until;
+}
+
+export async function getGroupRow(chat_id: number): Promise<GroupRow | null> {
+  const { data } = await admin()
+    .from("bot_groups")
+    .select("chat_id,title,is_premium,premium_until")
+    .eq("chat_id", chat_id)
+    .maybeSingle();
+  if (!data) return null;
+  const g = data as any;
+  return {
+    chat_id: Number(g.chat_id),
+    title: g.title ?? null,
+    is_premium: !!g.is_premium,
+    premium_until: g.premium_until ?? null,
+  };
+}
+
+/** Paged list of active groups, premium ones first. */
+export async function listGroupsPaged(opts: {
+  page: number;
+  pageSize: number;
+  onlyPremium?: boolean;
+}): Promise<{ rows: GroupRow[]; total: number }> {
+  const from = opts.page * opts.pageSize;
+  let q = admin()
+    .from("bot_groups")
+    .select("chat_id,title,is_premium,premium_until", { count: "exact" })
+    .eq("is_active", true);
+  if (opts.onlyPremium) q = q.eq("is_premium", true);
+  const { data, count } = await q
+    .order("is_premium", { ascending: false })
+    .order("last_seen", { ascending: false })
+    .range(from, from + opts.pageSize - 1);
+  const rows = ((data ?? []) as any[]).map((g) => ({
+    chat_id: Number(g.chat_id),
+    title: g.title ?? null,
+    is_premium: !!g.is_premium,
+    premium_until: g.premium_until ?? null,
+  }));
+  return { rows, total: count ?? rows.length };
+}
+
+async function _listUsers(): Promise<number[]> {
   // PostgREST caps a plain select at 1000 rows, so page through explicitly.
   const a = admin();
   const ids: number[] = [];

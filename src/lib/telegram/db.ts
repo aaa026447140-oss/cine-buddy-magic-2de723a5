@@ -38,6 +38,8 @@ export interface BotSettings {
   enable_premium: boolean;
   enable_premium_year: boolean;
   enable_premium_forever: boolean;
+  price_group_premium: number;
+  enable_group_premium: boolean;
 }
 
 export async function getSettings(): Promise<BotSettings> {

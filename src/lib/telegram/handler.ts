@@ -668,6 +668,24 @@ async function handleMessage(msg: any) {
       return;
     }
     if (payload.startsWith("unblock:")) {
+      // handled below
+    }
+    if (payload.startsWith("gbuy:")) {
+      const gid = Number(payload.split(":")[1]);
+      if (Number.isFinite(gid)) {
+        await setGroupPremium(gid, true, null).catch(() => {});
+        const g = await getGroupRow(gid).catch(() => null);
+        await sendMessage(
+          chat.id,
+          `👥 <b>פרימיום לקבוצה הופעל!</b>\n\nהקבוצה <b>${escapeHtml(g?.title || String(gid))}</b> מקבלת מעכשיו חיפושים ללא הגבלה.\n` +
+            `ℹ️ שים לב: החיפושים בצ׳אט הפרטי נשארים לפי המכסה הרגילה. תודה! ❤️`,
+        ).catch(() => {});
+        await sendMessage(gid, "👥 <b>הקבוצה קיבלה פרימיום!</b>\nמעכשיו החיפושים בקבוצה הזו ללא הגבלה 🎉").catch(() => {});
+        await sendMessage(ADMIN_ID, `👥 נרכש פרימיום לקבוצה <code>${gid}</code> (${sp.total_amount} ⭐) על ידי <code>${from.id}</code>.`).catch(() => {});
+      }
+      return;
+    }
+    if (payload.startsWith("unblock:")) {
       const reqId = Number(payload.split(":")[1]);
       await releaseUserAfterPayment(Number(from.id)).catch(() => {});
       await setUnblockRequestStatus(reqId, "paid").catch(() => {});

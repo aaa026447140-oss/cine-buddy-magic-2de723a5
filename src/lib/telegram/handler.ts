@@ -667,9 +667,6 @@ async function handleMessage(msg: any) {
       }
       return;
     }
-    if (payload.startsWith("unblock:")) {
-      // handled below
-    }
     if (payload.startsWith("gbuy:")) {
       const gid = Number(payload.split(":")[1]);
       if (Number.isFinite(gid)) {

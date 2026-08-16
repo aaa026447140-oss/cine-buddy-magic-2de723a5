@@ -1155,7 +1155,17 @@ async function sendGroupPurchasePrompt(chatId: number, cmd: string) {
   }
   await sendMessage(chatId, `${label}\n\nהתשלום מתבצע בצ׳אט הפרטי עם הבוט 👇`, {
     reply_markup: {
-      inline_keyboard: [[{ text: "המשך בצ׳אט הפרטי", url: `https://t.me/${me.username}?start=${payload}` }]],
+      inline_keyboard: [
+        [{ text: "המשך בצ׳אט הפרטי", url: `https://t.me/${me.username}?start=${payload}` }],
+        ...(chatId < 0 && (await getSettings()).enable_group_premium
+          ? [[
+              {
+                text: `👥 פרימיום לקבוצה — ללא הגבלה · ${(await getSettings()).price_group_premium} ⭐`,
+                url: `https://t.me/${me.username}?start=gp_${String(chatId).replace("-", "n")}`,
+              },
+            ]]
+          : []),
+      ],
     },
   });
 }

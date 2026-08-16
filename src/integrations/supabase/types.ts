@@ -82,7 +82,9 @@ export type Database = {
           added_at: string
           chat_id: number
           is_active: boolean
+          is_premium: boolean
           last_seen: string
+          premium_until: string | null
           title: string | null
           type: string | null
         }
@@ -90,7 +92,9 @@ export type Database = {
           added_at?: string
           chat_id: number
           is_active?: boolean
+          is_premium?: boolean
           last_seen?: string
+          premium_until?: string | null
           title?: string | null
           type?: string | null
         }
@@ -98,7 +102,9 @@ export type Database = {
           added_at?: string
           chat_id?: number
           is_active?: boolean
+          is_premium?: boolean
           last_seen?: string
+          premium_until?: string | null
           title?: string | null
           type?: string | null
         }
@@ -126,6 +132,7 @@ export type Database = {
         Row: {
           builder_username: string | null
           enable_daily: boolean
+          enable_group_premium: boolean
           enable_premium: boolean
           enable_premium_forever: boolean
           enable_premium_year: boolean
@@ -133,6 +140,7 @@ export type Database = {
           free_searches_per_day: number
           id: number
           price_daily_extra: number
+          price_group_premium: number
           price_premium: number
           price_premium_forever: number
           price_premium_year: number
@@ -157,6 +165,7 @@ export type Database = {
         Insert: {
           builder_username?: string | null
           enable_daily?: boolean
+          enable_group_premium?: boolean
           enable_premium?: boolean
           enable_premium_forever?: boolean
           enable_premium_year?: boolean
@@ -164,6 +173,7 @@ export type Database = {
           free_searches_per_day?: number
           id?: number
           price_daily_extra?: number
+          price_group_premium?: number
           price_premium?: number
           price_premium_forever?: number
           price_premium_year?: number
@@ -188,6 +198,7 @@ export type Database = {
         Update: {
           builder_username?: string | null
           enable_daily?: boolean
+          enable_group_premium?: boolean
           enable_premium?: boolean
           enable_premium_forever?: boolean
           enable_premium_year?: boolean
@@ -195,6 +206,7 @@ export type Database = {
           free_searches_per_day?: number
           id?: number
           price_daily_extra?: number
+          price_group_premium?: number
           price_premium?: number
           price_premium_forever?: number
           price_premium_year?: number

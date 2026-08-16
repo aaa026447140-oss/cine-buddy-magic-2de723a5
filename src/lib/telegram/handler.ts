@@ -1146,6 +1146,8 @@ async function sendGroupPurchasePrompt(chatId: number, cmd: string) {
 }
 
 async function sendPurchaseInvoice(chatId: number, userId: number, kind: BuyKind) {
+  const s0 = await getSettings();
+  void s0;
   const s = await getSettings();
   const item = purchaseCatalog(s)[kind];
   if (!item) return;

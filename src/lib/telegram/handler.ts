@@ -275,6 +275,8 @@ async function allowSearch(
 ): Promise<boolean> {
   if (!settings.quota_enabled) return true;
   if (await isAdmin(userId)) return true;
+  // Group premium: unlimited searches inside that group (does not affect private quota).
+  if (inGroup && (await isGroupPremium(chatId).catch(() => false))) return true;
   const ent = await getEntitlements(userId).catch(() => null);
   if (ent?.is_premium) return true;
   const limit = Math.max(0, Number(settings.free_searches_per_day || 0)) + (ent?.bonus_daily ?? 0);
@@ -282,12 +284,21 @@ async function allowSearch(
   if (res.allowed) return true;
   const me = await getMe();
   if (inGroup) {
+    const gpRows: any[][] = [[{ text: "🎟️ קבל עוד חיפושים", url: `https://t.me/${me.username}?start=quota` }]];
+    if (settings.enable_group_premium) {
+      gpRows.push([
+        {
+          text: `👥 פרימיום לקבוצה — ללא הגבלה · ${settings.price_group_premium} ⭐`,
+          url: `https://t.me/${me.username}?start=gp_${String(chatId).replace("-", "n")}`,
+        },
+      ]);
+    }
     await sendMessage(
       chatId,
       `⏳ נגמרו לך החיפושים החינמיים להיום (${limit}).\nפתח את הבוט בפרטי כדי לקבל עוד חיפושים.`,
       {
         reply_to_message_id: replyToMessageId,
-        reply_markup: { inline_keyboard: [[{ text: "🎟️ קבל עוד חיפושים", url: `https://t.me/${me.username}?start=quota` }]] },
+        reply_markup: { inline_keyboard: gpRows },
       } as any,
     ).catch(() => {});
     return false;

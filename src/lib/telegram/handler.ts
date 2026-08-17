@@ -520,6 +520,7 @@ export async function handleUpdate(update: any) {
     // again and again, spamming the chat with the same prompt.
     if (typeof update?.update_id === "number" && isDuplicateUpdate(update.update_id)) return;
     await syncBotCommands().catch(() => {});
+    if (await lockedOut(update)) return;
     if (update.message) return await handleMessage(update.message);
     if (update.edited_message) return; // ignore edits
     if (update.channel_post) return await handleChannelPost(update.channel_post);

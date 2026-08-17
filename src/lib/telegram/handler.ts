@@ -390,6 +390,29 @@ async function renderQuotaAdmin(chatId: number, messageId: number, s: BotSetting
   await editMessageText(chatId, messageId, quotaAdminText(s), { reply_markup: quotaAdminKeyboard(s) }).catch(() => {});
 }
 
+/** Admin view: custom premium plans (duration + price + on/off). */
+async function renderPlansAdmin(chatId: number, messageId?: number) {
+  const plans = await listPremiumPlans().catch(() => []);
+  const lines = plans.length
+    ? plans
+        .map(
+          (p) =>
+            `• פרימיום ל<b>${p.label || planDurationLabel(p.days)}</b> (${p.days} ימים) — <b>${p.price_stars}</b> ⭐ ${p.enabled ? "🟢" : "🔴"}`,
+        )
+        .join("\n")
+    : "<i>אין עדיין מסלולים מותאמים.</i>";
+  const text =
+    `🧩 <b>מסלולי פרימיום מותאמים</b>\n\n${lines}\n\n` +
+    `${plans.length}/${MAX_PREMIUM_PLANS} מסלולים.\n` +
+    `לחיצה על מסלול = שינוי מחיר · 🟢/🔴 = הפעלה/כיבוי · ❌ = מחיקה.`;
+  const kb = premiumPlansKeyboard(plans, plans.length < MAX_PREMIUM_PLANS);
+  if (messageId) {
+    const ok = await editMessageText(chatId, messageId, text, { reply_markup: kb }).then(() => true).catch(() => false);
+    if (ok) return;
+  }
+  await sendMessage(chatId, text, { reply_markup: kb }).catch(() => {});
+}
+
 // ───── Blocked words ─────
 async function renderBlockedWords(chatId: number, messageId: number) {
   const words = await listBlockedWords(true).catch(() => [] as string[]);

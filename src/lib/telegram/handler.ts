@@ -558,11 +558,11 @@ async function lockedOut(update: any): Promise<boolean> {
   if (!premium && (cbData.startsWith("buy_") || cbData.startsWith("buyp_"))) return false;
   const msgText: string = update?.message?.text || "";
   if (!premium && /^\/start\s+buyp?_/.test(msgText)) return false;
-  const LOCK_TEXT = premium
+  const LOCK_TEXT = s.lock_premium_too
     ? "🔒 הבוט נעול כרגע לצורכי תחזוקה. נסה שוב מאוחר יותר."
     : "🔒 <b>הבוט נעול כרגע.</b>\n\n💎 מנויי פרימיום ממשיכים להשתמש בבוט כרגיל.\nשדרג לפרימיום כדי לחפש סרטים גם עכשיו:";
-  const plans = premium ? [] : await listPremiumPlans(true).catch(() => []);
-  const extra = premium ? undefined : { reply_markup: lockUpsellKeyboard(s, plans) };
+  const plans = s.lock_premium_too ? [] : await listPremiumPlans(true).catch(() => []);
+  const extra = s.lock_premium_too ? undefined : { reply_markup: lockUpsellKeyboard(s, plans) };
   if (update.callback_query) {
     await answerCallbackQuery(update.callback_query.id, { text: LOCK_TEXT, show_alert: true }).catch(() => {});
     if (!premium && update.callback_query.message?.chat?.type === "private") {

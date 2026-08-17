@@ -1913,7 +1913,6 @@ async function handleAdminCallback(cq: any, data: string) {
         "🧩 שלח את מספר הימים של המסלול (לדוגמה 90 — יוצג כ«3 חודשים»):\n\nלביטול שלח /cancel",
       ).then(() => {}).catch(() => {});
     }
-    const [, , , ] = [];
     const pid = Number(data.split(":")[1]);
     if (!Number.isFinite(pid)) return;
     if (data.startsWith("admin_pl_t:")) {

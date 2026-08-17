@@ -556,6 +556,8 @@ async function lockedOut(update: any): Promise<boolean> {
   if (update?.message?.successful_payment) return false;
   const cbData: string = update?.callback_query?.data || "";
   if (!premium && (cbData.startsWith("buy_") || cbData.startsWith("buyp_"))) return false;
+  const msgText: string = update?.message?.text || "";
+  if (!premium && /^\/start\s+buyp?_/.test(msgText)) return false;
   const LOCK_TEXT = premium
     ? "🔒 הבוט נעול כרגע לצורכי תחזוקה. נסה שוב מאוחר יותר."
     : "🔒 <b>הבוט נעול כרגע.</b>\n\n💎 מנויי פרימיום ממשיכים להשתמש בבוט כרגיל.\nשדרג לפרימיום כדי לחפש סרטים גם עכשיו:";

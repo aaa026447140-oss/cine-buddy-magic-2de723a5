@@ -209,7 +209,7 @@ export function requiredChannelsKeyboard(
 
 export function adminPanelKeyboard(
   isMain: boolean,
-  support?: { hasGroup: boolean; topicsOn: boolean },
+  support?: { hasGroup: boolean; topicsOn: boolean; locked?: boolean },
 ) {
   const rows: any[][] = [
     [{ text: "🎬 ניהול ערוצי סרטים", callback_data: "admin_sources" }],
@@ -230,6 +230,12 @@ export function adminPanelKeyboard(
     }
   }
   rows.push([{ text: "🎟️ ניהול חיפושים ומחירים", callback_data: "admin_quota" }]);
+  rows.push([
+    {
+      text: support?.locked ? "🔓 הבוט נעול — לחץ לפתיחה" : "🔒 נעילת הבוט",
+      callback_data: "admin_lock_toggle",
+    },
+  ]);
   rows.push([{ text: "⭐ תומכים בכוכבים", callback_data: "admin_sup:0" }]);
   rows.push([{ text: "📊 סטטיסטיקות", callback_data: "admin_stats" }]);
   rows.push([

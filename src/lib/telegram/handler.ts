@@ -707,6 +707,24 @@ async function handleMessage(msg: any) {
       return;
     }
     if (payload.startsWith("gbuy:")) {
+      // handled below
+    }
+    if (payload.startsWith("buyp:")) {
+      const pid = Number(payload.split(":")[1]);
+      const plan = await getPremiumPlan(pid).catch(() => null);
+      const days = plan?.days || 30;
+      await setPremium(Number(from.id), true, days).catch(() => {});
+      const entL = await getEntitlements(Number(from.id)).catch(() => null);
+      const untilTxtL = entL?.premium_until
+        ? new Date(entL.premium_until).toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" })
+        : "";
+      await sendMessage(
+        chat.id,
+        `💎 הפרימיום הופעל ל${plan?.label || planDurationLabel(days)}! חיפושים ללא הגבלה${untilTxtL ? ` עד <b>${untilTxtL}</b>` : ""}. תודה! ❤️`,
+      ).catch(() => {});
+      return;
+    }
+    if (payload.startsWith("gbuy:")) {
       const gid = Number(payload.split(":")[1]);
       if (Number.isFinite(gid)) {
         await setGroupPremium(gid, true, null).catch(() => {});

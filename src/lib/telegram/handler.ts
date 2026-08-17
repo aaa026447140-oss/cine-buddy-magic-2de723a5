@@ -546,18 +546,30 @@ async function lockedOut(update: any): Promise<boolean> {
   const from = update?.message?.from || update?.callback_query?.from || update?.pre_checkout_query?.from;
   if (!from || from.is_bot) return !!update?.message || !!update?.callback_query;
   if (await isAdmin(Number(from.id)).catch(() => false)) return false;
-  const LOCK_TEXT = "🔒 הבוט נעול כרגע. נסה שוב מאוחר יותר.";
+  const ent = await getEntitlements(Number(from.id)).catch(() => null);
+  const premium = !!ent?.is_premium;
+  // Premium members keep full access unless the admin locked them out too.
+  if (premium && !s.lock_premium_too) return false;
+  // Always let payments go through so a locked-out user can upgrade.
+  if (update?.pre_checkout_query) return false;
+  if (update?.message?.successful_payment) return false;
+  const cbData: string = update?.callback_query?.data || "";
+  if (!premium && (cbData.startsWith("buy_") || cbData.startsWith("buyp_"))) return false;
+  const LOCK_TEXT = premium
+    ? "🔒 הבוט נעול כרגע לצורכי תחזוקה. נסה שוב מאוחר יותר."
+    : "🔒 <b>הבוט נעול כרגע.</b>\n\n💎 מנויי פרימיום ממשיכים להשתמש בבוט כרגיל.\nשדרג לפרימיום כדי לחפש סרטים גם עכשיו:";
+  const plans = premium ? [] : await listPremiumPlans(true).catch(() => []);
+  const extra = premium ? undefined : { reply_markup: lockUpsellKeyboard(s, plans) };
   if (update.callback_query) {
     await answerCallbackQuery(update.callback_query.id, { text: LOCK_TEXT, show_alert: true }).catch(() => {});
-    return true;
-  }
-  if (update.pre_checkout_query) {
-    await answerPreCheckoutQuery(update.pre_checkout_query.id, false, LOCK_TEXT).catch(() => {});
+    if (!premium && update.callback_query.message?.chat?.type === "private") {
+      await sendMessage(update.callback_query.message.chat.id, LOCK_TEXT, extra).catch(() => {});
+    }
     return true;
   }
   if (update.message) {
     if (update.message.chat?.type === "private") {
-      await sendMessage(update.message.chat.id, LOCK_TEXT).catch(() => {});
+      await sendMessage(update.message.chat.id, LOCK_TEXT, extra).catch(() => {});
     }
     return true;
   }

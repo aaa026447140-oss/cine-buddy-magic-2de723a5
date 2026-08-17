@@ -1,0 +1,1 @@
+ALTER TABLE public.bot_settings ADD COLUMN IF NOT EXISTS lock_premium_too boolean NOT NULL DEFAULT false;

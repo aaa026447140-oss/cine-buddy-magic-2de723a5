@@ -140,6 +140,7 @@ export type Database = {
           enable_single: boolean
           free_searches_per_day: number
           id: number
+          lock_premium_too: boolean
           price_daily_extra: number
           price_group_premium: number
           price_premium: number
@@ -174,6 +175,7 @@ export type Database = {
           enable_single?: boolean
           free_searches_per_day?: number
           id?: number
+          lock_premium_too?: boolean
           price_daily_extra?: number
           price_group_premium?: number
           price_premium?: number
@@ -208,6 +210,7 @@ export type Database = {
           enable_single?: boolean
           free_searches_per_day?: number
           id?: number
+          lock_premium_too?: boolean
           price_daily_extra?: number
           price_group_premium?: number
           price_premium?: number

@@ -362,7 +362,8 @@ async function sendQuotaMenu(chatId: number, userId: number, editMessageId?: num
   const me = await getMe();
   const q = await quotaInfo(userId, settings);
   const text = quotaText(q, settings, me.username, userId);
-  const kb = quotaMenuKeyboard(settings, me.username, userId, q.premium);
+  const plans = await listPremiumPlans(true).catch(() => []);
+  const kb = quotaMenuKeyboard(settings, me.username, userId, q.premium, plans);
   if (editMessageId) {
     const ok = await editMessageText(chatId, editMessageId, text, { reply_markup: kb }).then(() => true).catch(() => false);
     if (ok) return;

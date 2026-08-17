@@ -130,6 +130,28 @@ export function supportMenuKeyboard() {
   return { inline_keyboard: rows };
 }
 
+/** Purchase options shown to non-premium users while the bot is locked. */
+export function lockUpsellKeyboard(s: BotSettings, plans: PremiumPlan[] = []) {
+  const rows: any[][] = [];
+  if (s.enable_premium) rows.push([{ text: `💎 פרימיום לחודש · ${s.price_premium} ⭐`, callback_data: "buy_premium" }]);
+  if (s.enable_premium_year)
+    rows.push([{ text: `🏆 פרימיום לשנה · ${s.price_premium_year} ⭐`, callback_data: "buy_premium_year" }]);
+  if (s.enable_premium_forever)
+    rows.push([{ text: `♾️ פרימיום לנצח · ${s.price_premium_forever} ⭐`, callback_data: "buy_premium_forever" }]);
+  for (const p of plans) {
+    rows.push([
+      { text: `💎 פרימיום ל${p.label || planDurationLabel(p.days)} · ${p.price_stars} ⭐`, callback_data: `buyp_${p.id}` },
+    ]);
+  }
+  return { inline_keyboard: rows };
+}
+
+function _unusedSupportMenuKeyboard() {
+  const rows = STAR_AMOUNTS.map((n) => [{ text: `⭐ ${n} כוכבים`, callback_data: `donate_${n}` }]);
+  rows.push([{ text: "« חזרה", callback_data: "back_to_start" }]);
+  return { inline_keyboard: rows };
+}
+
 export function resultsKeyboard(
   results: { id: number; title: string }[],
   page: number,

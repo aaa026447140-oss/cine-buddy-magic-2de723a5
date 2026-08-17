@@ -706,9 +706,6 @@ async function handleMessage(msg: any) {
       }
       return;
     }
-    if (payload.startsWith("gbuy:")) {
-      // handled below
-    }
     if (payload.startsWith("buyp:")) {
       const pid = Number(payload.split(":")[1]);
       const plan = await getPremiumPlan(pid).catch(() => null);

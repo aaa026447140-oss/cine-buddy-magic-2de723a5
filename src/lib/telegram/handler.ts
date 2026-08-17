@@ -1232,6 +1232,26 @@ async function sendPurchaseInvoice(chatId: number, userId: number, kind: BuyKind
 }
 
 /** Group premium: unlimited searches for everyone inside one specific group. */
+async function sendPlanInvoice(chatId: number, userId: number, planId: number) {
+  const p = await getPremiumPlan(planId).catch(() => null);
+  if (!p || !p.enabled || !(p.price_stars > 0)) {
+    await sendMessage(chatId, "🚫 המסלול הזה אינו זמין כרגע.").catch(() => {});
+    return;
+  }
+  const label = p.label || planDurationLabel(p.days);
+  await sendInvoice({
+    chat_id: chatId,
+    title: `פרימיום ל${label} — ללא הגבלה`,
+    description: `חיפושים ללא הגבלה למשך ${p.days} ימים.`,
+    payload: `buyp:${p.id}:${userId}:${Date.now()}`,
+    currency: "XTR",
+    prices: [{ label: `${p.price_stars} Stars`, amount: p.price_stars }],
+  }).catch((e: any) => {
+    console.error("plan sendInvoice failed:", e?.message);
+    sendMessage(chatId, "❌ לא הצלחתי לפתוח חלון תשלום. נסה שוב מאוחר יותר.");
+  });
+}
+
 async function sendGroupPremiumInvoice(chatId: number, userId: number, groupId: number) {
   const s = await getSettings();
   if (!s.enable_group_premium) {

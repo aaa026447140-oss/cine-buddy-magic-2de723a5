@@ -835,6 +835,10 @@ async function handleMessage(msg: any) {
       const kind = PURCHASE_KINDS[payload.slice(4)];
       if (kind) return await sendPurchaseInvoice(chat.id, Number(from.id), kind);
     }
+    if (payload.startsWith("buyp_")) {
+      const pid = Number(payload.slice(5));
+      if (Number.isFinite(pid)) return await sendPlanInvoice(chat.id, Number(from.id), pid);
+    }
     return await sendStartMenu(chat.id, Number(from.id));
   }
 

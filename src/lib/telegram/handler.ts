@@ -1983,6 +1983,27 @@ async function handleAdminCallback(cq: any, data: string) {
         }),
       }).catch(() => {});
     }
+    case "admin_lock_premium_toggle": {
+      if (!main) return;
+      const cfg = await getSettings();
+      const next = !cfg.lock_premium_too;
+      await updateSettings({ lock_premium_too: next } as any);
+      return await editMessageText(
+        chatId,
+        messageId,
+        next
+          ? "💎 <b>הנעילה חלה גם על מנויי פרימיום.</b>"
+          : "💎 <b>מנויי פרימיום פטורים מהנעילה</b> — הם ימשיכו להשתמש בבוט, ולשאר המשתמשים תוצע שדרוג לפרימיום.",
+        {
+          reply_markup: adminPanelKeyboard(main, {
+            hasGroup: !!cfg.support_group_id,
+            topicsOn: !!cfg.support_topics_enabled,
+            locked: !!cfg.bot_locked,
+            lockPremium: next,
+          }),
+        },
+      ).catch(() => {});
+    }
     case "admin_lock_toggle": {
       if (!main) return;
       const cfg = await getSettings();

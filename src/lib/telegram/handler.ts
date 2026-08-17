@@ -1335,6 +1335,7 @@ async function sendAdminPanel(chatId: number, userId?: number) {
     reply_markup: adminPanelKeyboard(main, {
       hasGroup: !!cfg?.support_group_id,
       topicsOn: !!cfg?.support_topics_enabled,
+      locked: !!cfg?.bot_locked,
     }),
   });
 }

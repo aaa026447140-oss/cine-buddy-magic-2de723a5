@@ -2535,6 +2535,39 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
     return;
   }
 
+  // Custom premium plan creation / price editing
+  if (st.state === "admin_plan_days" || st.state === "admin_plan_price" || st.state === "admin_plan_price_edit") {
+    const n = parseInt(text.replace(/[^\d]/g, ""), 10);
+    if (!Number.isFinite(n) || n <= 0) {
+      await sendMessage(chatId, "❌ שלח מספר חיובי בלבד. לביטול /cancel");
+      return;
+    }
+    if (st.state === "admin_plan_days") {
+      await setAdminState(userId, "admin_plan_price", { days: n });
+      await sendMessage(
+        chatId,
+        `⏳ המסלול: <b>${planDurationLabel(n)}</b> (${n} ימים).\n💰 עכשיו שלח את המחיר בכוכבים:\n\nלביטול /cancel`,
+      ).catch(() => {});
+      return;
+    }
+    await setAdminState(userId, null);
+    if (st.state === "admin_plan_price") {
+      const days = Number(st.data?.days || 30);
+      const cnt = await countPremiumPlans().catch(() => 0);
+      if (cnt >= MAX_PREMIUM_PLANS) {
+        await sendMessage(chatId, `🚫 הגעת למקסימום של ${MAX_PREMIUM_PLANS} מסלולים.`).catch(() => {});
+        return;
+      }
+      await createPremiumPlan(days, n).catch(() => {});
+      await sendMessage(chatId, `✅ נוסף מסלול: פרימיום ל<b>${planDurationLabel(days)}</b> · ${n} ⭐`).catch(() => {});
+    } else {
+      await updatePremiumPlan(Number(st.data?.id), { price_stars: n }).catch(() => {});
+      await sendMessage(chatId, "✅ המחיר עודכן.").catch(() => {});
+    }
+    await renderPlansAdmin(chatId);
+    return;
+  }
+
   if (
     st.state === "awaiting_source_channel" ||
     st.state === "awaiting_source_channel_add" ||

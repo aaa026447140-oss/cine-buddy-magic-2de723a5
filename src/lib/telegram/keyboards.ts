@@ -146,12 +146,6 @@ export function lockUpsellKeyboard(s: BotSettings, plans: PremiumPlan[] = []) {
   return { inline_keyboard: rows };
 }
 
-function _unusedSupportMenuKeyboard() {
-  const rows = STAR_AMOUNTS.map((n) => [{ text: `⭐ ${n} כוכבים`, callback_data: `donate_${n}` }]);
-  rows.push([{ text: "« חזרה", callback_data: "back_to_start" }]);
-  return { inline_keyboard: rows };
-}
-
 export function resultsKeyboard(
   results: { id: number; title: string }[],
   page: number,

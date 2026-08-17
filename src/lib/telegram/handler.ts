@@ -1899,6 +1899,41 @@ async function handleAdminCallback(cq: any, data: string) {
     return;
   }
 
+  // Custom premium plans
+  if (data === "admin_plans" || data.startsWith("admin_pl_")) {
+    if (data === "admin_plans") return await renderPlansAdmin(chatId, messageId);
+    if (data === "admin_pl_add") {
+      const n = await countPremiumPlans().catch(() => 0);
+      if (n >= MAX_PREMIUM_PLANS) {
+        return await sendMessage(chatId, `🚫 הגעת למקסימום של ${MAX_PREMIUM_PLANS} מסלולים.`).then(() => {}).catch(() => {});
+      }
+      await setAdminState(Number(userId), "admin_plan_days");
+      return await sendMessage(
+        chatId,
+        "🧩 שלח את מספר הימים של המסלול (לדוגמה 90 — יוצג כ«3 חודשים»):\n\nלביטול שלח /cancel",
+      ).then(() => {}).catch(() => {});
+    }
+    const [, , , ] = [];
+    const pid = Number(data.split(":")[1]);
+    if (!Number.isFinite(pid)) return;
+    if (data.startsWith("admin_pl_t:")) {
+      const p = await getPremiumPlan(pid);
+      if (p) await updatePremiumPlan(pid, { enabled: !p.enabled });
+      return await renderPlansAdmin(chatId, messageId);
+    }
+    if (data.startsWith("admin_pl_d:")) {
+      await deletePremiumPlan(pid);
+      return await renderPlansAdmin(chatId, messageId);
+    }
+    if (data.startsWith("admin_pl_p:")) {
+      await setAdminState(Number(userId), "admin_plan_price_edit", { id: pid });
+      return await sendMessage(chatId, "💰 שלח את המחיר החדש בכוכבים למסלול הזה:\n\nלביטול שלח /cancel")
+        .then(() => {})
+        .catch(() => {});
+    }
+    return;
+  }
+
   switch (data) {
     case "admin_open": {
       const cfg = await getSettings().catch(() => null);

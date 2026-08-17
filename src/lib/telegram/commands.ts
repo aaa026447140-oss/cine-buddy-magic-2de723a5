@@ -1,5 +1,5 @@
 import { tg, setMyCommands } from "./api";
-import { ADMIN_ID } from "./constants";
+import { getAdminId } from "./constants";
 
 /** Commands every user sees in the blue "/" menu (private + groups). */
 const PUBLIC_COMMANDS = [
@@ -28,7 +28,7 @@ export async function syncBotCommands(force = false) {
     await setMyCommands(PUBLIC_COMMANDS, { type: "all_group_chats" });
     // Group admins get their own scope in Telegram — keep it clean too.
     await setMyCommands(PUBLIC_COMMANDS, { type: "all_chat_administrators" });
-    await setMyCommands(ADMIN_COMMANDS, { type: "chat", chat_id: ADMIN_ID });
+    await setMyCommands(ADMIN_COMMANDS, { type: "chat", chat_id: getAdminId() });
   } catch (e: any) {
     synced = false;
     console.error("setMyCommands failed:", e?.description || e?.message || e);

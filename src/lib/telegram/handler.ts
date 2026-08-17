@@ -13,7 +13,7 @@ import {
   sendMessage,
   tg,
 } from "./api";
-import { ADMIN_ID, PAGE_SIZE, STAR_AMOUNTS } from "./constants";
+import { getAdminId, PAGE_SIZE, STAR_AMOUNTS } from "./constants";
 import { parseCommand, syncBotCommands } from "./commands";
 import { formatDuration, formatWhen, isInappropriateQuery, matchesBlockedWords } from "./moderation";
 import {
@@ -177,11 +177,11 @@ async function checkGroupPermissions(chatId: number): Promise<
 }
 
 function isMainAdmin(userId: number | undefined) {
-  return userId === ADMIN_ID;
+  return userId === getAdminId();
 }
 async function isAdmin(userId: number | undefined): Promise<boolean> {
   if (!userId) return false;
-  return isUserAdmin(userId, ADMIN_ID);
+  return isUserAdmin(userId, getAdminId());
 }
 
 function extractTitle(msg: any): string {
@@ -770,7 +770,7 @@ async function handleMessage(msg: any) {
             `ℹ️ שים לב: החיפושים בצ׳אט הפרטי נשארים לפי המכסה הרגילה. תודה! ❤️`,
         ).catch(() => {});
         await sendMessage(gid, "👥 <b>הקבוצה קיבלה פרימיום!</b>\nמעכשיו החיפושים בקבוצה הזו ללא הגבלה 🎉").catch(() => {});
-        await sendMessage(ADMIN_ID, `👥 נרכש פרימיום לקבוצה <code>${gid}</code> (${sp.total_amount} ⭐) על ידי <code>${from.id}</code>.`).catch(() => {});
+        await sendMessage(getAdminId(), `👥 נרכש פרימיום לקבוצה <code>${gid}</code> (${sp.total_amount} ⭐) על ידי <code>${from.id}</code>.`).catch(() => {});
       }
       return;
     }
@@ -780,7 +780,7 @@ async function handleMessage(msg: any) {
       await setUnblockRequestStatus(reqId, "paid").catch(() => {});
       await sendMessage(chat.id, "🔓 החסימה שלך הוסרה. תודה! שים לב — עבירה נוספת תוביל לחסימה חדשה.");
       await sendMessage(
-        ADMIN_ID,
+        getAdminId(),
         `💰 המשתמש <code>${from.id}</code> שילם ${sp.total_amount} ⭐ והחסימה שלו הוסרה.`,
       ).catch(() => {});
       return;
@@ -1016,7 +1016,7 @@ async function forwardSupportMessage(msg: any) {
 /** Main-admin replies inside the contact group are relayed to the user. */
 async function handleSupportGroupMessage(msg: any) {
   const from = msg.from;
-  if (Number(from?.id) !== ADMIN_ID) return;
+  if (Number(from?.id) !== getAdminId()) return;
   if (msg.text && msg.text.trim() === "/cancel") return;
   if (msg.forum_topic_created || msg.forum_topic_edited || msg.forum_topic_closed || msg.forum_topic_reopened) return;
   const replyTo = msg.reply_to_message;
@@ -1751,7 +1751,7 @@ async function handleCallback(cq: any) {
     }
     await sendMessage(chatId, "📨 הבקשה נשלחה לאדמין הראשי. תקבל הודעה כשהיא תאושר.").catch(() => {});
     await sendMessage(
-      ADMIN_ID,
+      getAdminId(),
       `🔓 <b>בקשת שחרור מחסימה</b>\n\n` +
         `👤 ${escapeHtml(displayUserName(u))}\n🆔 <code>${u.telegram_id}</code>\n` +
         `סוג חסימה: <b>${u.blocked_until ? formatWhen(u.blocked_until) : "לצמיתות"}</b>\n` +
@@ -2887,7 +2887,7 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
         });
         const who = await getBotUser(userId).catch(() => null);
         await sendMessage(
-          ADMIN_ID,
+          getAdminId(),
           `📣 <b>בקשת שידור מאדמין</b>\n\n` +
             `👤 ${escapeHtml(who ? displayUserName(who) : String(userId))} · <code>${userId}</code>\n` +
             `🎯 יעד: <b>${target}</b>\n\n` +
@@ -2903,7 +2903,7 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
             },
           },
         );
-        await copyMessage(ADMIN_ID, Number(msg.chat.id), Number(msg.message_id)).catch(() => {});
+        await copyMessage(getAdminId(), Number(msg.chat.id), Number(msg.message_id)).catch(() => {});
         await sendMessage(chatId, "📨 הבקשה נשלחה לאדמין הראשי לאישור. תקבל עדכון כאן.");
       } catch (e: any) {
         await sendMessage(chatId, `❌ שגיאה בשליחת הבקשה: ${escapeHtml(e?.message || String(e))}`).catch(() => {});

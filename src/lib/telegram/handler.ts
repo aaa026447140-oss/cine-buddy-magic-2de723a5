@@ -13,7 +13,7 @@ import {
   sendMessage,
   tg,
 } from "./api";
-import { ADMIN_ID, PAGE_SIZE, STAR_AMOUNTS } from "./constants";
+import { getAdminId, PAGE_SIZE, STAR_AMOUNTS } from "./constants";
 import { parseCommand, syncBotCommands } from "./commands";
 import { formatDuration, formatWhen, isInappropriateQuery, matchesBlockedWords } from "./moderation";
 import {

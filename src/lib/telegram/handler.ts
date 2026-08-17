@@ -512,6 +512,34 @@ function isDuplicateUpdate(id: number) {
   return false;
 }
 
+/**
+ * Bot lock: when enabled by the main admin, every incoming message/callback
+ * from a non-admin is answered with a short "locked" notice and dropped.
+ */
+async function lockedOut(update: any): Promise<boolean> {
+  const s = await getSettings().catch(() => null);
+  if (!s?.bot_locked) return false;
+  const from = update?.message?.from || update?.callback_query?.from || update?.pre_checkout_query?.from;
+  if (!from || from.is_bot) return !!update?.message || !!update?.callback_query;
+  if (await isAdmin(Number(from.id)).catch(() => false)) return false;
+  const LOCK_TEXT = "🔒 הבוט נעול כרגע. נסה שוב מאוחר יותר.";
+  if (update.callback_query) {
+    await answerCallbackQuery(update.callback_query.id, { text: LOCK_TEXT, show_alert: true }).catch(() => {});
+    return true;
+  }
+  if (update.pre_checkout_query) {
+    await answerPreCheckoutQuery(update.pre_checkout_query.id, false, LOCK_TEXT).catch(() => {});
+    return true;
+  }
+  if (update.message) {
+    if (update.message.chat?.type === "private") {
+      await sendMessage(update.message.chat.id, LOCK_TEXT).catch(() => {});
+    }
+    return true;
+  }
+  return false;
+}
+
 export async function handleUpdate(update: any) {
   // ── duplicate-update guard (in-memory, per worker isolate) ──
   try {

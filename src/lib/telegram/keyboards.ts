@@ -130,6 +130,22 @@ export function supportMenuKeyboard() {
   return { inline_keyboard: rows };
 }
 
+/** Purchase options shown to non-premium users while the bot is locked. */
+export function lockUpsellKeyboard(s: BotSettings, plans: PremiumPlan[] = []) {
+  const rows: any[][] = [];
+  if (s.enable_premium) rows.push([{ text: `💎 פרימיום לחודש · ${s.price_premium} ⭐`, callback_data: "buy_premium" }]);
+  if (s.enable_premium_year)
+    rows.push([{ text: `🏆 פרימיום לשנה · ${s.price_premium_year} ⭐`, callback_data: "buy_premium_year" }]);
+  if (s.enable_premium_forever)
+    rows.push([{ text: `♾️ פרימיום לנצח · ${s.price_premium_forever} ⭐`, callback_data: "buy_premium_forever" }]);
+  for (const p of plans) {
+    rows.push([
+      { text: `💎 פרימיום ל${p.label || planDurationLabel(p.days)} · ${p.price_stars} ⭐`, callback_data: `buyp_${p.id}` },
+    ]);
+  }
+  return { inline_keyboard: rows };
+}
+
 export function resultsKeyboard(
   results: { id: number; title: string }[],
   page: number,
@@ -209,7 +225,7 @@ export function requiredChannelsKeyboard(
 
 export function adminPanelKeyboard(
   isMain: boolean,
-  support?: { hasGroup: boolean; topicsOn: boolean; locked?: boolean },
+  support?: { hasGroup: boolean; topicsOn: boolean; locked?: boolean; lockPremium?: boolean },
 ) {
   const rows: any[][] = [
     [{ text: "🎬 ניהול ערוצי סרטים", callback_data: "admin_sources" }],
@@ -236,6 +252,14 @@ export function adminPanelKeyboard(
       callback_data: "admin_lock_toggle",
     },
   ]);
+  if (support?.locked) {
+    rows.push([
+      {
+        text: support?.lockPremium ? "💎 נעול גם למנויי פרימיום" : "💎 פרימיום פטור מהנעילה",
+        callback_data: "admin_lock_premium_toggle",
+      },
+    ]);
+  }
   rows.push([{ text: "⭐ תומכים בכוכבים", callback_data: "admin_sup:0" }]);
   rows.push([{ text: "📊 סטטיסטיקות", callback_data: "admin_stats" }]);
   rows.push([

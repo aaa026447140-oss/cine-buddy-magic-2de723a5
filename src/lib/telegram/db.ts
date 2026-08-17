@@ -40,6 +40,7 @@ export interface BotSettings {
   enable_premium_forever: boolean;
   price_group_premium: number;
   enable_group_premium: boolean;
+  bot_locked: boolean;
 }
 
 export async function getSettings(): Promise<BotSettings> {

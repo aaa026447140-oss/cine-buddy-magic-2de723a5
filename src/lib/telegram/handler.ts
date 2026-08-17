@@ -1588,6 +1588,23 @@ async function handleCallback(cq: any) {
     return;
   }
 
+  if (data.startsWith("buyp_")) {
+    await answerCallbackQuery(cq.id);
+    const pid = Number(data.slice(5));
+    if (!Number.isFinite(pid)) return;
+    if (msg.chat.type !== "private") {
+      const me = await getMe();
+      await sendMessage(chatId, "💫 התשלום מתבצע בצ׳אט הפרטי עם הבוט 👇", {
+        reply_markup: {
+          inline_keyboard: [[{ text: "המשך בצ׳אט הפרטי", url: `https://t.me/${me.username}?start=buyp_${pid}` }]],
+        },
+      }).catch(() => {});
+      return;
+    }
+    await sendPlanInvoice(chatId, Number(from.id), pid);
+    return;
+  }
+
   if (data.startsWith("donate_")) {
     const amount = parseInt(data.slice("donate_".length), 10);
     if (!STAR_AMOUNTS.includes(amount)) return answerCallbackQuery(cq.id, { text: "סכום לא חוקי", show_alert: true });

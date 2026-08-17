@@ -1351,6 +1351,7 @@ async function sendAdminPanel(chatId: number, userId?: number) {
       hasGroup: !!cfg?.support_group_id,
       topicsOn: !!cfg?.support_topics_enabled,
       locked: !!cfg?.bot_locked,
+          lockPremium: !!cfg?.lock_premium_too,
     }),
   });
 }
@@ -1980,6 +1981,7 @@ async function handleAdminCallback(cq: any, data: string) {
           hasGroup: !!cfg?.support_group_id,
           topicsOn: !!cfg?.support_topics_enabled,
           locked: !!cfg?.bot_locked,
+          lockPremium: !!cfg?.lock_premium_too,
         }),
       }).catch(() => {});
     }

@@ -53,6 +53,14 @@ import {
   getGroupRow,
   isGroupPremium,
   setGroupPremium,
+  listPremiumPlans,
+  getPremiumPlan,
+  countPremiumPlans,
+  createPremiumPlan,
+  updatePremiumPlan,
+  deletePremiumPlan,
+  planDurationLabel,
+  MAX_PREMIUM_PLANS,
   listSourceChannels,
   listUsers,
   markGroupInactive,
@@ -126,6 +134,7 @@ import {
   quotaAdminKeyboard,
   blockedWordsKeyboard,
 } from "./keyboards";
+import { premiumPlansKeyboard } from "./keyboards";
 
 let _me: { id: number; username: string } | null = null;
 async function getMe() {
@@ -353,7 +362,8 @@ async function sendQuotaMenu(chatId: number, userId: number, editMessageId?: num
   const me = await getMe();
   const q = await quotaInfo(userId, settings);
   const text = quotaText(q, settings, me.username, userId);
-  const kb = quotaMenuKeyboard(settings, me.username, userId, q.premium);
+  const plans = await listPremiumPlans(true).catch(() => []);
+  const kb = quotaMenuKeyboard(settings, me.username, userId, q.premium, plans);
   if (editMessageId) {
     const ok = await editMessageText(chatId, editMessageId, text, { reply_markup: kb }).then(() => true).catch(() => false);
     if (ok) return;
@@ -378,6 +388,29 @@ function quotaAdminText(s: BotSettings): string {
 
 async function renderQuotaAdmin(chatId: number, messageId: number, s: BotSettings) {
   await editMessageText(chatId, messageId, quotaAdminText(s), { reply_markup: quotaAdminKeyboard(s) }).catch(() => {});
+}
+
+/** Admin view: custom premium plans (duration + price + on/off). */
+async function renderPlansAdmin(chatId: number, messageId?: number) {
+  const plans = await listPremiumPlans().catch(() => []);
+  const lines = plans.length
+    ? plans
+        .map(
+          (p) =>
+            `• פרימיום ל<b>${p.label || planDurationLabel(p.days)}</b> (${p.days} ימים) — <b>${p.price_stars}</b> ⭐ ${p.enabled ? "🟢" : "🔴"}`,
+        )
+        .join("\n")
+    : "<i>אין עדיין מסלולים מותאמים.</i>";
+  const text =
+    `🧩 <b>מסלולי פרימיום מותאמים</b>\n\n${lines}\n\n` +
+    `${plans.length}/${MAX_PREMIUM_PLANS} מסלולים.\n` +
+    `לחיצה על מסלול = שינוי מחיר · 🟢/🔴 = הפעלה/כיבוי · ❌ = מחיקה.`;
+  const kb = premiumPlansKeyboard(plans, plans.length < MAX_PREMIUM_PLANS);
+  if (messageId) {
+    const ok = await editMessageText(chatId, messageId, text, { reply_markup: kb }).then(() => true).catch(() => false);
+    if (ok) return;
+  }
+  await sendMessage(chatId, text, { reply_markup: kb }).catch(() => {});
 }
 
 // ───── Blocked words ─────
@@ -503,6 +536,34 @@ function isDuplicateUpdate(id: number) {
   return false;
 }
 
+/**
+ * Bot lock: when enabled by the main admin, every incoming message/callback
+ * from a non-admin is answered with a short "locked" notice and dropped.
+ */
+async function lockedOut(update: any): Promise<boolean> {
+  const s = await getSettings().catch(() => null);
+  if (!s?.bot_locked) return false;
+  const from = update?.message?.from || update?.callback_query?.from || update?.pre_checkout_query?.from;
+  if (!from || from.is_bot) return !!update?.message || !!update?.callback_query;
+  if (await isAdmin(Number(from.id)).catch(() => false)) return false;
+  const LOCK_TEXT = "🔒 הבוט נעול כרגע. נסה שוב מאוחר יותר.";
+  if (update.callback_query) {
+    await answerCallbackQuery(update.callback_query.id, { text: LOCK_TEXT, show_alert: true }).catch(() => {});
+    return true;
+  }
+  if (update.pre_checkout_query) {
+    await answerPreCheckoutQuery(update.pre_checkout_query.id, false, LOCK_TEXT).catch(() => {});
+    return true;
+  }
+  if (update.message) {
+    if (update.message.chat?.type === "private") {
+      await sendMessage(update.message.chat.id, LOCK_TEXT).catch(() => {});
+    }
+    return true;
+  }
+  return false;
+}
+
 export async function handleUpdate(update: any) {
   // ── duplicate-update guard (in-memory, per worker isolate) ──
   try {
@@ -511,6 +572,7 @@ export async function handleUpdate(update: any) {
     // again and again, spamming the chat with the same prompt.
     if (typeof update?.update_id === "number" && isDuplicateUpdate(update.update_id)) return;
     await syncBotCommands().catch(() => {});
+    if (await lockedOut(update)) return;
     if (update.message) return await handleMessage(update.message);
     if (update.edited_message) return; // ignore edits
     if (update.channel_post) return await handleChannelPost(update.channel_post);
@@ -667,6 +729,21 @@ async function handleMessage(msg: any) {
       }
       return;
     }
+    if (payload.startsWith("buyp:")) {
+      const pid = Number(payload.split(":")[1]);
+      const plan = await getPremiumPlan(pid).catch(() => null);
+      const days = plan?.days || 30;
+      await setPremium(Number(from.id), true, days).catch(() => {});
+      const entL = await getEntitlements(Number(from.id)).catch(() => null);
+      const untilTxtL = entL?.premium_until
+        ? new Date(entL.premium_until).toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" })
+        : "";
+      await sendMessage(
+        chat.id,
+        `💎 הפרימיום הופעל ל${plan?.label || planDurationLabel(days)}! חיפושים ללא הגבלה${untilTxtL ? ` עד <b>${untilTxtL}</b>` : ""}. תודה! ❤️`,
+      ).catch(() => {});
+      return;
+    }
     if (payload.startsWith("gbuy:")) {
       const gid = Number(payload.split(":")[1]);
       if (Number.isFinite(gid)) {
@@ -795,6 +872,10 @@ async function handleMessage(msg: any) {
     if (payload.startsWith("buy_")) {
       const kind = PURCHASE_KINDS[payload.slice(4)];
       if (kind) return await sendPurchaseInvoice(chat.id, Number(from.id), kind);
+    }
+    if (payload.startsWith("buyp_")) {
+      const pid = Number(payload.slice(5));
+      if (Number.isFinite(pid)) return await sendPlanInvoice(chat.id, Number(from.id), pid);
     }
     return await sendStartMenu(chat.id, Number(from.id));
   }
@@ -1193,6 +1274,26 @@ async function sendPurchaseInvoice(chatId: number, userId: number, kind: BuyKind
 }
 
 /** Group premium: unlimited searches for everyone inside one specific group. */
+async function sendPlanInvoice(chatId: number, userId: number, planId: number) {
+  const p = await getPremiumPlan(planId).catch(() => null);
+  if (!p || !p.enabled || !(p.price_stars > 0)) {
+    await sendMessage(chatId, "🚫 המסלול הזה אינו זמין כרגע.").catch(() => {});
+    return;
+  }
+  const label = p.label || planDurationLabel(p.days);
+  await sendInvoice({
+    chat_id: chatId,
+    title: `פרימיום ל${label} — ללא הגבלה`,
+    description: `חיפושים ללא הגבלה למשך ${p.days} ימים.`,
+    payload: `buyp:${p.id}:${userId}:${Date.now()}`,
+    currency: "XTR",
+    prices: [{ label: `${p.price_stars} Stars`, amount: p.price_stars }],
+  }).catch((e: any) => {
+    console.error("plan sendInvoice failed:", e?.message);
+    sendMessage(chatId, "❌ לא הצלחתי לפתוח חלון תשלום. נסה שוב מאוחר יותר.");
+  });
+}
+
 async function sendGroupPremiumInvoice(chatId: number, userId: number, groupId: number) {
   const s = await getSettings();
   if (!s.enable_group_premium) {
@@ -1234,6 +1335,7 @@ async function sendAdminPanel(chatId: number, userId?: number) {
     reply_markup: adminPanelKeyboard(main, {
       hasGroup: !!cfg?.support_group_id,
       topicsOn: !!cfg?.support_topics_enabled,
+      locked: !!cfg?.bot_locked,
     }),
   });
 }
@@ -1507,6 +1609,23 @@ async function handleCallback(cq: any) {
   if (data.startsWith("buy_") && PURCHASE_KINDS[data.slice(4)]) {
     await answerCallbackQuery(cq.id);
     await sendPurchaseInvoice(chatId, Number(from.id), PURCHASE_KINDS[data.slice(4)]!);
+    return;
+  }
+
+  if (data.startsWith("buyp_")) {
+    await answerCallbackQuery(cq.id);
+    const pid = Number(data.slice(5));
+    if (!Number.isFinite(pid)) return;
+    if (msg.chat.type !== "private") {
+      const me = await getMe();
+      await sendMessage(chatId, "💫 התשלום מתבצע בצ׳אט הפרטי עם הבוט 👇", {
+        reply_markup: {
+          inline_keyboard: [[{ text: "המשך בצ׳אט הפרטי", url: `https://t.me/${me.username}?start=buyp_${pid}` }]],
+        },
+      }).catch(() => {});
+      return;
+    }
+    await sendPlanInvoice(chatId, Number(from.id), pid);
     return;
   }
 
@@ -1804,6 +1923,40 @@ async function handleAdminCallback(cq: any, data: string) {
     return;
   }
 
+  // Custom premium plans
+  if (data === "admin_plans" || data.startsWith("admin_pl_")) {
+    if (data === "admin_plans") return await renderPlansAdmin(chatId, messageId);
+    if (data === "admin_pl_add") {
+      const n = await countPremiumPlans().catch(() => 0);
+      if (n >= MAX_PREMIUM_PLANS) {
+        return await sendMessage(chatId, `🚫 הגעת למקסימום של ${MAX_PREMIUM_PLANS} מסלולים.`).then(() => {}).catch(() => {});
+      }
+      await setAdminState(Number(userId), "admin_plan_days");
+      return await sendMessage(
+        chatId,
+        "🧩 שלח את מספר הימים של המסלול (לדוגמה 90 — יוצג כ«3 חודשים»):\n\nלביטול שלח /cancel",
+      ).then(() => {}).catch(() => {});
+    }
+    const pid = Number(data.split(":")[1]);
+    if (!Number.isFinite(pid)) return;
+    if (data.startsWith("admin_pl_t:")) {
+      const p = await getPremiumPlan(pid);
+      if (p) await updatePremiumPlan(pid, { enabled: !p.enabled });
+      return await renderPlansAdmin(chatId, messageId);
+    }
+    if (data.startsWith("admin_pl_d:")) {
+      await deletePremiumPlan(pid);
+      return await renderPlansAdmin(chatId, messageId);
+    }
+    if (data.startsWith("admin_pl_p:")) {
+      await setAdminState(Number(userId), "admin_plan_price_edit", { id: pid });
+      return await sendMessage(chatId, "💰 שלח את המחיר החדש בכוכבים למסלול הזה:\n\nלביטול שלח /cancel")
+        .then(() => {})
+        .catch(() => {});
+    }
+    return;
+  }
+
   switch (data) {
     case "admin_open": {
       const cfg = await getSettings().catch(() => null);
@@ -1811,8 +1964,29 @@ async function handleAdminCallback(cq: any, data: string) {
         reply_markup: adminPanelKeyboard(main, {
           hasGroup: !!cfg?.support_group_id,
           topicsOn: !!cfg?.support_topics_enabled,
+          locked: !!cfg?.bot_locked,
         }),
       }).catch(() => {});
+    }
+    case "admin_lock_toggle": {
+      if (!main) return;
+      const cfg = await getSettings();
+      const next = !cfg.bot_locked;
+      await updateSettings({ bot_locked: next } as any);
+      return await editMessageText(
+        chatId,
+        messageId,
+        next
+          ? "🔒 <b>הבוט ננעל.</b>\nכל משתמש שאינו אדמין יקבל הודעה שהבוט נעול."
+          : "🔓 <b>הבוט נפתח.</b>\nהשירות חזר לפעילות רגילה לכל המשתמשים.",
+        {
+          reply_markup: adminPanelKeyboard(main, {
+            hasGroup: !!cfg.support_group_id,
+            topicsOn: !!cfg.support_topics_enabled,
+            locked: next,
+          }),
+        },
+      ).catch(() => {});
     }
     case "admin_topics_toggle": {
       if (!main) return;
@@ -2380,6 +2554,39 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
     }
     const s = await getSettings();
     await sendMessage(chatId, quotaAdminText(s), { reply_markup: quotaAdminKeyboard(s) }).catch(() => {});
+    return;
+  }
+
+  // Custom premium plan creation / price editing
+  if (st.state === "admin_plan_days" || st.state === "admin_plan_price" || st.state === "admin_plan_price_edit") {
+    const n = parseInt(text.replace(/[^\d]/g, ""), 10);
+    if (!Number.isFinite(n) || n <= 0) {
+      await sendMessage(chatId, "❌ שלח מספר חיובי בלבד. לביטול /cancel");
+      return;
+    }
+    if (st.state === "admin_plan_days") {
+      await setAdminState(userId, "admin_plan_price", { days: n });
+      await sendMessage(
+        chatId,
+        `⏳ המסלול: <b>${planDurationLabel(n)}</b> (${n} ימים).\n💰 עכשיו שלח את המחיר בכוכבים:\n\nלביטול /cancel`,
+      ).catch(() => {});
+      return;
+    }
+    await setAdminState(userId, null);
+    if (st.state === "admin_plan_price") {
+      const days = Number(st.data?.days || 30);
+      const cnt = await countPremiumPlans().catch(() => 0);
+      if (cnt >= MAX_PREMIUM_PLANS) {
+        await sendMessage(chatId, `🚫 הגעת למקסימום של ${MAX_PREMIUM_PLANS} מסלולים.`).catch(() => {});
+        return;
+      }
+      await createPremiumPlan(days, n).catch(() => {});
+      await sendMessage(chatId, `✅ נוסף מסלול: פרימיום ל<b>${planDurationLabel(days)}</b> · ${n} ⭐`).catch(() => {});
+    } else {
+      await updatePremiumPlan(Number(st.data?.id), { price_stars: n }).catch(() => {});
+      await sendMessage(chatId, "✅ המחיר עודכן.").catch(() => {});
+    }
+    await renderPlansAdmin(chatId);
     return;
   }
 

@@ -1,5 +1,5 @@
 import { STAR_AMOUNTS } from "./constants";
-import type { BotSettings } from "./db";
+import { planDurationLabel, type BotSettings, type PremiumPlan } from "./db";
 
 export function startMenuKeyboard(s: BotSettings, botUsername: string) {
   const rows: any[][] = [];
@@ -38,6 +38,7 @@ export function quotaMenuKeyboard(
   botUsername: string,
   userId: number,
   isPremium: boolean,
+  plans: PremiumPlan[] = [],
 ) {
   const rows: any[][] = [];
   rows.push([
@@ -55,6 +56,15 @@ export function quotaMenuKeyboard(
       rows.push([{ text: `🏆 פרימיום לשנה — ללא הגבלה · ${s.price_premium_year} ⭐`, callback_data: "buy_premium_year" }]);
     if (s.enable_premium_forever)
       rows.push([{ text: `♾️ פרימיום לנצח — ללא הגבלה · ${s.price_premium_forever} ⭐`, callback_data: "buy_premium_forever" }]);
+    for (const p of plans) {
+      if (!p.enabled || !(p.price_stars > 0)) continue;
+      rows.push([
+        {
+          text: `⭐ פרימיום ל${p.label || planDurationLabel(p.days)} · ${p.price_stars} ⭐`,
+          callback_data: `buyp_${p.id}`,
+        },
+      ]);
+    }
   }
   rows.push([{ text: "« חזרה", callback_data: "back_to_start" }]);
   return { inline_keyboard: rows };
@@ -92,10 +102,26 @@ export function quotaAdminKeyboard(s: BotSettings) {
       ],
       [{ text: "💎 ניהול פרימיום למשתמשים", callback_data: "admin_prem:recent:0" }],
       [{ text: "👥 ניהול פרימיום לקבוצות", callback_data: "admin_gprem:0" }],
+      [{ text: "🧩 מסלולי פרימיום מותאמים", callback_data: "admin_plans" }],
       [{ text: "♻️ אפס את המכסה היומית לכולם", callback_data: "admin_q_reset" }],
       [{ text: "« חזרה", callback_data: "admin_open" }],
     ],
   };
+}
+
+/** Admin list of custom premium plans (price / toggle / delete per plan). */
+export function premiumPlansKeyboard(plans: PremiumPlan[], canAdd: boolean) {
+  const rows: any[][] = [];
+  for (const p of plans) {
+    rows.push([
+      { text: `${p.label || planDurationLabel(p.days)} · ${p.price_stars} ⭐`, callback_data: `admin_pl_p:${p.id}` },
+      { text: p.enabled ? "🟢" : "🔴", callback_data: `admin_pl_t:${p.id}` },
+      { text: "❌", callback_data: `admin_pl_d:${p.id}` },
+    ]);
+  }
+  if (canAdd) rows.push([{ text: "➕ הוסף מסלול פרימיום", callback_data: "admin_pl_add" }]);
+  rows.push([{ text: "« חזרה", callback_data: "admin_quota" }]);
+  return { inline_keyboard: rows };
 }
 
 export function supportMenuKeyboard() {
@@ -183,7 +209,7 @@ export function requiredChannelsKeyboard(
 
 export function adminPanelKeyboard(
   isMain: boolean,
-  support?: { hasGroup: boolean; topicsOn: boolean },
+  support?: { hasGroup: boolean; topicsOn: boolean; locked?: boolean },
 ) {
   const rows: any[][] = [
     [{ text: "🎬 ניהול ערוצי סרטים", callback_data: "admin_sources" }],
@@ -204,6 +230,12 @@ export function adminPanelKeyboard(
     }
   }
   rows.push([{ text: "🎟️ ניהול חיפושים ומחירים", callback_data: "admin_quota" }]);
+  rows.push([
+    {
+      text: support?.locked ? "🔓 הבוט נעול — לחץ לפתיחה" : "🔒 נעילת הבוט",
+      callback_data: "admin_lock_toggle",
+    },
+  ]);
   rows.push([{ text: "⭐ תומכים בכוכבים", callback_data: "admin_sup:0" }]);
   rows.push([{ text: "📊 סטטיסטיקות", callback_data: "admin_stats" }]);
   rows.push([

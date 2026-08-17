@@ -130,6 +130,7 @@ export type Database = {
       }
       bot_settings: {
         Row: {
+          bot_locked: boolean
           builder_username: string | null
           enable_daily: boolean
           enable_group_premium: boolean
@@ -163,6 +164,7 @@ export type Database = {
           updates_channel_url: string | null
         }
         Insert: {
+          bot_locked?: boolean
           builder_username?: string | null
           enable_daily?: boolean
           enable_group_premium?: boolean
@@ -196,6 +198,7 @@ export type Database = {
           updates_channel_url?: string | null
         }
         Update: {
+          bot_locked?: boolean
           builder_username?: string | null
           enable_daily?: boolean
           enable_group_premium?: boolean
@@ -491,6 +494,36 @@ export type Database = {
           raw_caption?: string | null
           source_channel_id?: number
           title?: string
+        }
+        Relationships: []
+      }
+      premium_plans: {
+        Row: {
+          created_at: string
+          days: number
+          enabled: boolean
+          id: number
+          label: string | null
+          price_stars: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          days: number
+          enabled?: boolean
+          id?: number
+          label?: string | null
+          price_stars?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          days?: number
+          enabled?: boolean
+          id?: number
+          label?: string | null
+          price_stars?: number
+          updated_at?: string
         }
         Relationships: []
       }

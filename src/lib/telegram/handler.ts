@@ -2022,6 +2022,7 @@ async function handleAdminCallback(cq: any, data: string) {
             hasGroup: !!cfg.support_group_id,
             topicsOn: !!cfg.support_topics_enabled,
             locked: next,
+            lockPremium: !!cfg.lock_premium_too,
           }),
         },
       ).catch(() => {});

@@ -134,6 +134,7 @@ import {
   quotaAdminKeyboard,
   blockedWordsKeyboard,
 } from "./keyboards";
+import { premiumPlansKeyboard } from "./keyboards";
 
 let _me: { id: number; username: string } | null = null;
 async function getMe() {

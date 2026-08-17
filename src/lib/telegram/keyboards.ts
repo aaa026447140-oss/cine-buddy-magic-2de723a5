@@ -209,7 +209,7 @@ export function requiredChannelsKeyboard(
 
 export function adminPanelKeyboard(
   isMain: boolean,
-  support?: { hasGroup: boolean; topicsOn: boolean; locked?: boolean },
+  support?: { hasGroup: boolean; topicsOn: boolean; locked?: boolean; lockPremium?: boolean },
 ) {
   const rows: any[][] = [
     [{ text: "🎬 ניהול ערוצי סרטים", callback_data: "admin_sources" }],
@@ -236,6 +236,14 @@ export function adminPanelKeyboard(
       callback_data: "admin_lock_toggle",
     },
   ]);
+  if (support?.locked) {
+    rows.push([
+      {
+        text: support?.lockPremium ? "💎 נעול גם למנויי פרימיום" : "💎 פרימיום פטור מהנעילה",
+        callback_data: "admin_lock_premium_toggle",
+      },
+    ]);
+  }
   rows.push([{ text: "⭐ תומכים בכוכבים", callback_data: "admin_sup:0" }]);
   rows.push([{ text: "📊 סטטיסטיקות", callback_data: "admin_stats" }]);
   rows.push([

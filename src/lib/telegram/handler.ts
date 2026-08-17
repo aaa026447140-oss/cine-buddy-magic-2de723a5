@@ -1963,8 +1963,29 @@ async function handleAdminCallback(cq: any, data: string) {
         reply_markup: adminPanelKeyboard(main, {
           hasGroup: !!cfg?.support_group_id,
           topicsOn: !!cfg?.support_topics_enabled,
+          locked: !!cfg?.bot_locked,
         }),
       }).catch(() => {});
+    }
+    case "admin_lock_toggle": {
+      if (!main) return;
+      const cfg = await getSettings();
+      const next = !cfg.bot_locked;
+      await updateSettings({ bot_locked: next } as any);
+      return await editMessageText(
+        chatId,
+        messageId,
+        next
+          ? "🔒 <b>הבוט ננעל.</b>\nכל משתמש שאינו אדמין יקבל הודעה שהבוט נעול."
+          : "🔓 <b>הבוט נפתח.</b>\nהשירות חזר לפעילות רגילה לכל המשתמשים.",
+        {
+          reply_markup: adminPanelKeyboard(main, {
+            hasGroup: !!cfg.support_group_id,
+            topicsOn: !!cfg.support_topics_enabled,
+            locked: next,
+          }),
+        },
+      ).catch(() => {});
     }
     case "admin_topics_toggle": {
       if (!main) return;

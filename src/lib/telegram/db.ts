@@ -1828,3 +1828,60 @@ export async function listSupportTopicIds(group_chat_id: number): Promise<number
     .limit(2000);
   return ((data as any[]) || []).map((r) => Number(r.topic_id)).filter(Boolean);
 }
+
+// ───── Custom premium plans (up to MAX_PREMIUM_PLANS admin-defined tiers) ─────
+export const MAX_PREMIUM_PLANS = 50;
+
+export interface PremiumPlan {
+  id: number;
+  days: number;
+  price_stars: number;
+  label: string | null;
+  enabled: boolean;
+}
+
+/** Human label for a duration in days, e.g. 90 → "3 חודשים". */
+export function planDurationLabel(days: number): string {
+  if (days >= 365 && days % 365 === 0) {
+    const y = days / 365;
+    return y === 1 ? "שנה" : y === 2 ? "שנתיים" : `${y} שנים`;
+  }
+  if (days >= 30 && days % 30 === 0) {
+    const m = days / 30;
+    return m === 1 ? "חודש" : m === 2 ? "חודשיים" : `${m} חודשים`;
+  }
+  if (days >= 7 && days % 7 === 0) {
+    const w = days / 7;
+    return w === 1 ? "שבוע" : w === 2 ? "שבועיים" : `${w} שבועות`;
+  }
+  return days === 1 ? "יום אחד" : `${days} ימים`;
+}
+
+export async function listPremiumPlans(onlyEnabled = false): Promise<PremiumPlan[]> {
+  let q = admin().from("premium_plans" as any).select("*").order("days", { ascending: true }).limit(MAX_PREMIUM_PLANS);
+  if (onlyEnabled) q = q.eq("enabled", true);
+  const { data } = await q;
+  return ((data as any[]) || []) as PremiumPlan[];
+}
+
+export async function getPremiumPlan(id: number): Promise<PremiumPlan | null> {
+  const { data } = await admin().from("premium_plans" as any).select("*").eq("id", id).maybeSingle();
+  return (data as any) || null;
+}
+
+export async function countPremiumPlans(): Promise<number> {
+  const { count } = await admin().from("premium_plans" as any).select("id", { count: "exact", head: true });
+  return Number(count || 0);
+}
+
+export async function createPremiumPlan(days: number, price_stars: number, label?: string | null) {
+  await admin().from("premium_plans" as any).insert({ days, price_stars, label: label ?? null } as any);
+}
+
+export async function updatePremiumPlan(id: number, patch: Partial<PremiumPlan>) {
+  await admin().from("premium_plans" as any).update(patch as any).eq("id", id);
+}
+
+export async function deletePremiumPlan(id: number) {
+  await admin().from("premium_plans" as any).delete().eq("id", id);
+}

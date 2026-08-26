@@ -417,6 +417,44 @@ async function renderPlansAdmin(chatId: number, messageId?: number) {
   await sendMessage(chatId, text, { reply_markup: kb }).catch(() => {});
 }
 
+// ───── Popular searches ─────
+async function renderPopularSearches(chatId: number, messageId: number) {
+  const [top, totals] = await Promise.all([
+    popularSearches(30).catch(() => [] as any[]),
+    searchStatsTotals().catch(() => ({ searches: 0, found: 0, notfound: 0, terms: 0 })),
+  ]);
+  const kb = {
+    inline_keyboard: [
+      [{ text: "🔄 רענן", callback_data: "admin_pop" }],
+      [{ text: "« חזרה", callback_data: "admin_open" }],
+    ],
+  };
+  if (!top.length) {
+    await editMessageText(chatId, messageId, "🔥 <b>חיפושים פופולריים</b>\n\nעדיין אין נתוני חיפוש.", {
+      reply_markup: kb,
+    }).catch(() => {});
+    return;
+  }
+  const pct = (a: number, b: number) => (b > 0 ? `${((a / b) * 100).toFixed(1)}%` : "0%");
+  const lines = top.map((r: any, i: number) => {
+    const s = Number(r.searches || 0);
+    const f = Number(r.found_count || 0);
+    const icon = f > 0 ? (Number(r.notfound_count || 0) > 0 ? "🟡" : "🟢") : "🔴";
+    return (
+      `${i + 1}. ${icon} <b>${escapeHtml(String(r.query || "").slice(0, 60))}</b>\n` +
+      `   🔎 ${s.toLocaleString()} חיפושים · ✅ ${f.toLocaleString()} נמצאו · ❌ ${Number(r.notfound_count || 0).toLocaleString()} · הצלחה ${pct(f, s)}`
+    );
+  });
+  const text =
+    `🔥 <b>30 החיפושים הפופולריים ביותר</b>\n\n` +
+    `📊 סה״כ ביטויי חיפוש: <b>${totals.terms.toLocaleString()}</b>\n` +
+    `🔎 סה״כ חיפושים: <b>${totals.searches.toLocaleString()}</b>\n` +
+    `✅ עם תוצאות: <b>${totals.found.toLocaleString()}</b> · ❌ ללא תוצאות: <b>${totals.notfound.toLocaleString()}</b>\n` +
+    `🎯 <b>אחוז הצלחה כולל: ${pct(totals.found, totals.searches)}</b>\n\n` +
+    lines.join("\n");
+  await editMessageText(chatId, messageId, text.slice(0, 4000), { reply_markup: kb }).catch(() => {});
+}
+
 // ───── Blocked words ─────
 async function renderBlockedWords(chatId: number, messageId: number) {
   const words = await listBlockedWords(true).catch(() => [] as string[]);

@@ -1386,6 +1386,8 @@ async function runSearchAndRespond(
   const rows = sliced.rows;
   const total = sliced.total;
   const hiddenDuplicates = sliced.hiddenDuplicates;
+  // Popularity stats: only for a fresh search (not pagination / dedupe toggles).
+  if (!editMessageId && page === 0) bumpSearchStat(query, total).catch(() => {});
   if (total === 0) {
     const txt = `❌ לא נמצאו תוצאות עבור: <b>${escapeHtml(query)}</b>`;
     if (editMessageId) await editMessageText(chatId, editMessageId, txt).catch(() => {});

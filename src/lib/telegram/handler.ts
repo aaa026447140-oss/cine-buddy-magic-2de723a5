@@ -1569,6 +1569,16 @@ async function handleCallback(cq: any) {
     return;
   }
 
+  if (data === "policy_view") {
+    await answerCallbackQuery(cq.id);
+    const st = await getSettings();
+    const body = (st.usage_policy_text || "").trim() || "עדיין לא הוגדרה מדיניות שימוש.";
+    await editMessageText(chatId, msg.message_id, `📜 <b>מדיניות שימוש</b>\n\n${body}`, {
+      reply_markup: { inline_keyboard: [[{ text: "« חזרה", callback_data: "back_to_start" }]] },
+    }).catch(() => {});
+    return;
+  }
+
   if (data === "support_menu") {
     await answerCallbackQuery(cq.id);
     await editMessageText(

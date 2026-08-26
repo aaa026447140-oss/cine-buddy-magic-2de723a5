@@ -23,10 +23,11 @@ export function startMenuKeyboard(s: BotSettings, botUsername: string) {
     "restrict_members",
   ].join("+");
   rows.push([
-    { text: "❤️ תמיכה בבוט", callback_data: "support_menu" },
+    { text: "❤️ תמיכה בבוט", callback_data: "support_menu", style: "success" },
     { text: "➕ הוספה לקבוצה", url: `https://t.me/${botUsername}?startgroup=true&admin=${addRights}` },
   ]);
   rows.push([{ text: "📢 פרסום ממומן", callback_data: "ads_menu" }]);
+  rows.push([{ text: "📜 מדיניות שימוש", callback_data: "policy_view", style: "primary" }]);
   if (s.support_group_id) {
     rows.push([{ text: "✉️ פנייה לאדמין", callback_data: "contact_admin" }]);
   }

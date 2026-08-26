@@ -181,7 +181,7 @@ export function resultsKeyboard(
   } else {
     rows.push([{ text: `🧹 הפעל סינון כפילויות`, callback_data: `dup:${queryId}:1:${page}` }]);
   }
-  rows.push([{ text: "❤️ תמיכה בבוט", callback_data: "support_menu" }]);
+  rows.push([{ text: "❤️ תמיכה בבוט", callback_data: "support_menu", style: "success" }]);
   return { inline_keyboard: rows };
 }
 

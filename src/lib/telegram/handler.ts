@@ -2321,6 +2321,15 @@ async function handleAdminCallback(cq: any, data: string) {
     }
     return;
   }
+  if (data === "admin_policy") {
+    const st = await getSettings();
+    const cur = (st.usage_policy_text || "").trim() || "— לא הוגדר —";
+    await setAdminState(userId, "admin_policy_text");
+    return await sendMessage(
+      chatId,
+      `📜 <b>מדיניות שימוש</b>\n\nהטקסט הנוכחי:\n${cur}\n\nשלח עכשיו את הטקסט החדש (תומך ב-HTML בסיסי).\nלביטול שלח /cancel`,
+    ).then(() => {}).catch(() => {});
+  }
   if (data === "admin_words") {
     return await renderBlockedWords(chatId, messageId);
   }

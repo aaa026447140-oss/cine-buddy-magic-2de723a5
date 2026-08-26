@@ -1167,7 +1167,7 @@ async function buildStartView(userId: number) {
     text += q.premium
       ? `\n\n💎 <b>פרימיום פעיל</b> — חיפושים ללא הגבלה.`
       : `\n\n🎟️ נשארו לך היום <b>${Math.max(0, q.limit - q.used)}</b> מתוך <b>${q.limit}</b> חיפושים חינם.`;
-    kb.inline_keyboard.unshift([{ text: "🎟️ החיפושים שלי", callback_data: "quota_menu" }]);
+    kb.inline_keyboard.unshift([{ text: "🎟️ החיפושים שלי", callback_data: "quota_menu", style: "success" }]);
   }
   if (await isAdmin(userId)) {
     kb.inline_keyboard.unshift([{ text: "⚙️ לוח אדמין", callback_data: "admin_open" }]);

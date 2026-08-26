@@ -1,0 +1,1 @@
+ALTER TABLE public.bot_settings ADD COLUMN IF NOT EXISTS usage_policy_text TEXT NOT NULL DEFAULT 'עדיין לא הוגדרה מדיניות שימוש.';

@@ -2390,6 +2390,9 @@ async function handleAdminCallback(cq: any, data: string) {
     if (word) await removeBlockedWord(word).catch(() => {});
     return await renderBlockedWords(chatId, messageId);
   }
+  if (data === "admin_pop") {
+    return await renderPopularSearches(chatId, messageId);
+  }
   if (data === "admin_load") {
     return await renderServerLoad(chatId, messageId);
   }

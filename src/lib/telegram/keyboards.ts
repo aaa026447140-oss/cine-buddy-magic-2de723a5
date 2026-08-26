@@ -264,6 +264,7 @@ export function adminPanelKeyboard(
   rows.push([{ text: "📜 עריכת מדיניות שימוש", callback_data: "admin_policy" }]);
   rows.push([{ text: "⭐ תומכים בכוכבים", callback_data: "admin_sup:0" }]);
   rows.push([{ text: "📊 סטטיסטיקות", callback_data: "admin_stats" }]);
+  rows.push([{ text: "🔥 חיפושים פופולריים", callback_data: "admin_pop" }]);
   rows.push([
     { text: "🚫 מילים חסומות", callback_data: "admin_words" },
     { text: "📈 מד עומס שרת", callback_data: "admin_load" },

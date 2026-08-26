@@ -2588,6 +2588,19 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
     return;
   }
 
+  // Usage policy text
+  if (st.state === "admin_policy_text") {
+    const body = (msg.text || msg.caption || "").trim();
+    if (!body) {
+      await sendMessage(chatId, "❌ שלח טקסט בלבד. לביטול /cancel");
+      return;
+    }
+    await setAdminState(userId, null);
+    await updateSettings({ usage_policy_text: body } as any);
+    await sendMessage(chatId, `✅ מדיניות השימוש עודכנה.\n\n📜 <b>מדיניות שימוש</b>\n\n${body}`).catch(() => {});
+    return;
+  }
+
   // Search quota / pricing inputs
   if (st.state.startsWith("admin_q_")) {
     const n = parseInt(text.replace(/[^\d-]/g, ""), 10);

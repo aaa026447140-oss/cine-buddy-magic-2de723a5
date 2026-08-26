@@ -22,27 +22,33 @@ const DANGER_RE = /(^❌|🔴|🚫|✖️|מחק|הסר|חסום|לחסום|דח
 const SUCCESS_RE = /(^✅|🟢|⭐|💎|🏆|♾️|➕|🎁|אישור|אשר|שלם|קנה|רכישה|פרימיום|הפעל|שחרר|פתח חסימה)/;
 const PRIMARY_RE = /(^«|^»|⬅️|➡️|📢|🔎|🔍|📊|📈|⚙️|🧵|📋|🎬|👥|👤|📣|📮|🎟️|🔗|❤️)/;
 
-/** Pick a color for a button that did not declare one explicitly. */
-function autoStyle(btn: any): ButtonStyleValue | undefined {
+/** Pick a color for a button that did not declare one explicitly. Never returns undefined — every button gets a color. */
+function autoStyle(btn: any): ButtonStyleValue {
   const text = String(btn?.text ?? "");
   if (DANGER_RE.test(text)) return ButtonStyle.DANGER;
   if (SUCCESS_RE.test(text)) return ButtonStyle.SUCCESS;
   if (PRIMARY_RE.test(text) || btn?.url) return ButtonStyle.PRIMARY;
-  return undefined;
+  return ButtonStyle.PRIMARY;
 }
 
-/** Apply colors to every inline button of an outgoing payload. */
+/** Apply colors to every inline/reply button of an outgoing payload. */
 function styleMarkup(body: any) {
-  const rows = body?.reply_markup?.inline_keyboard;
+  const markup = body?.reply_markup;
+  const rows = markup?.inline_keyboard ?? markup?.keyboard;
   if (!Array.isArray(rows)) return;
   for (const row of rows) {
     if (!Array.isArray(row)) continue;
-    for (const btn of row) {
+    for (let i = 0; i < row.length; i++) {
+      const btn = row[i];
+      if (typeof btn === "string") {
+        row[i] = { text: btn, style: ButtonStyle.PRIMARY };
+        continue;
+      }
       if (!btn || typeof btn !== "object" || btn.style) continue;
-      const s = autoStyle(btn);
-      if (s) btn.style = s;
+      btn.style = autoStyle(btn);
     }
   }
+
 }
 
 export async function tg<T = any>(method: string, body?: any): Promise<T> {

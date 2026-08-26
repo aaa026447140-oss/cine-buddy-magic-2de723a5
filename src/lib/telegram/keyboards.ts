@@ -261,6 +261,7 @@ export function adminPanelKeyboard(
       },
     ]);
   }
+  rows.push([{ text: "📜 עריכת מדיניות שימוש", callback_data: "admin_policy" }]);
   rows.push([{ text: "⭐ תומכים בכוכבים", callback_data: "admin_sup:0" }]);
   rows.push([{ text: "📊 סטטיסטיקות", callback_data: "admin_stats" }]);
   rows.push([

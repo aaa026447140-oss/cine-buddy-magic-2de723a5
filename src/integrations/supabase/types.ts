@@ -163,6 +163,7 @@ export type Database = {
           support_topics_enabled: boolean
           updated_at: string
           updates_channel_url: string | null
+          usage_policy_text: string
         }
         Insert: {
           bot_locked?: boolean
@@ -198,6 +199,7 @@ export type Database = {
           support_topics_enabled?: boolean
           updated_at?: string
           updates_channel_url?: string | null
+          usage_policy_text?: string
         }
         Update: {
           bot_locked?: boolean
@@ -233,6 +235,7 @@ export type Database = {
           support_topics_enabled?: boolean
           updated_at?: string
           updates_channel_url?: string | null
+          usage_policy_text?: string
         }
         Relationships: []
       }

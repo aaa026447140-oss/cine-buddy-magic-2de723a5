@@ -1167,7 +1167,7 @@ async function buildStartView(userId: number) {
     text += q.premium
       ? `\n\n💎 <b>פרימיום פעיל</b> — חיפושים ללא הגבלה.`
       : `\n\n🎟️ נשארו לך היום <b>${Math.max(0, q.limit - q.used)}</b> מתוך <b>${q.limit}</b> חיפושים חינם.`;
-    kb.inline_keyboard.unshift([{ text: "🎟️ החיפושים שלי", callback_data: "quota_menu" }]);
+    kb.inline_keyboard.unshift([{ text: "🎟️ החיפושים שלי", callback_data: "quota_menu", style: "success" }]);
   }
   if (await isAdmin(userId)) {
     kb.inline_keyboard.unshift([{ text: "⚙️ לוח אדמין", callback_data: "admin_open" }]);
@@ -1565,6 +1565,16 @@ async function handleCallback(cq: any) {
           [{ text: "« חזרה", callback_data: "ads_menu" }],
         ],
       },
+    }).catch(() => {});
+    return;
+  }
+
+  if (data === "policy_view") {
+    await answerCallbackQuery(cq.id);
+    const st = await getSettings();
+    const body = (st.usage_policy_text || "").trim() || "עדיין לא הוגדרה מדיניות שימוש.";
+    await editMessageText(chatId, msg.message_id, `📜 <b>מדיניות שימוש</b>\n\n${body}`, {
+      reply_markup: { inline_keyboard: [[{ text: "« חזרה", callback_data: "back_to_start" }]] },
     }).catch(() => {});
     return;
   }
@@ -2311,6 +2321,15 @@ async function handleAdminCallback(cq: any, data: string) {
     }
     return;
   }
+  if (data === "admin_policy") {
+    const st = await getSettings();
+    const cur = (st.usage_policy_text || "").trim() || "— לא הוגדר —";
+    await setAdminState(userId, "admin_policy_text");
+    return await sendMessage(
+      chatId,
+      `📜 <b>מדיניות שימוש</b>\n\nהטקסט הנוכחי:\n${cur}\n\nשלח עכשיו את הטקסט החדש (תומך ב-HTML בסיסי).\nלביטול שלח /cancel`,
+    ).then(() => {}).catch(() => {});
+  }
   if (data === "admin_words") {
     return await renderBlockedWords(chatId, messageId);
   }
@@ -2566,6 +2585,19 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
   if (text === "/cancel") {
     await setAdminState(userId, null);
     await sendMessage(chatId, "❎ בוטל.");
+    return;
+  }
+
+  // Usage policy text
+  if (st.state === "admin_policy_text") {
+    const body = (msg.text || msg.caption || "").trim();
+    if (!body) {
+      await sendMessage(chatId, "❌ שלח טקסט בלבד. לביטול /cancel");
+      return;
+    }
+    await setAdminState(userId, null);
+    await updateSettings({ usage_policy_text: body } as any);
+    await sendMessage(chatId, `✅ מדיניות השימוש עודכנה.\n\n📜 <b>מדיניות שימוש</b>\n\n${body}`).catch(() => {});
     return;
   }
 

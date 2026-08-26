@@ -42,6 +42,7 @@ export interface BotSettings {
   enable_group_premium: boolean;
   bot_locked: boolean;
   lock_premium_too: boolean;
+  usage_policy_text: string;
 }
 
 export async function getSettings(): Promise<BotSettings> {

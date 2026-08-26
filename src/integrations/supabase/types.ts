@@ -605,6 +605,39 @@ export type Database = {
         }
         Relationships: []
       }
+      search_stats: {
+        Row: {
+          created_at: string
+          found_count: number
+          last_at: string
+          last_results: number
+          notfound_count: number
+          query: string
+          query_norm: string
+          searches: number
+        }
+        Insert: {
+          created_at?: string
+          found_count?: number
+          last_at?: string
+          last_results?: number
+          notfound_count?: number
+          query: string
+          query_norm: string
+          searches?: number
+        }
+        Update: {
+          created_at?: string
+          found_count?: number
+          last_at?: string
+          last_results?: number
+          notfound_count?: number
+          query?: string
+          query_norm?: string
+          searches?: number
+        }
+        Relationships: []
+      }
       search_usage: {
         Row: {
           day: string
@@ -778,6 +811,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      bump_search_stat: {
+        Args: { _query: string; _results: number }
+        Returns: undefined
+      }
       consume_search: {
         Args: { _limit: number; _telegram_id: number }
         Returns: {

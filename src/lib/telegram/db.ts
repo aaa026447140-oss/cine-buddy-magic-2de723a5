@@ -151,6 +151,47 @@ export async function logSearch(telegram_id: number, query: string, flagged = fa
   await admin().from("search_log").insert({ telegram_id, query: q } as any);
 }
 
+/** Aggregated popularity counter for a search term (found vs. not found). */
+export async function bumpSearchStat(query: string, results: number) {
+  const q = (query || "").trim();
+  if (!q) return;
+  await admin().rpc("bump_search_stat" as any, { _query: q.slice(0, 200), _results: Math.max(0, results | 0) } as any);
+}
+
+export interface PopularSearch {
+  query: string;
+  searches: number;
+  found_count: number;
+  notfound_count: number;
+  last_results: number;
+}
+
+/** Top search terms overall, ordered by how many times they were searched. */
+export async function popularSearches(limit = 30): Promise<PopularSearch[]> {
+  const { data } = await admin()
+    .from("search_stats")
+    .select("query,searches,found_count,notfound_count,last_results")
+    .order("searches", { ascending: false })
+    .limit(limit);
+  return (data ?? []) as any;
+}
+
+/** Global totals across every recorded search term. */
+export async function searchStatsTotals(): Promise<{ searches: number; found: number; notfound: number; terms: number }> {
+  const a = admin();
+  const [{ count }, { data }] = await Promise.all([
+    a.from("search_stats").select("*", { count: "exact", head: true }),
+    a.from("search_stats").select("searches,found_count,notfound_count").limit(5000),
+  ]);
+  let searches = 0, found = 0, notfound = 0;
+  for (const r of (data ?? []) as any[]) {
+    searches += Number(r.searches || 0);
+    found += Number(r.found_count || 0);
+    notfound += Number(r.notfound_count || 0);
+  }
+  return { searches, found, notfound, terms: count ?? (data ?? []).length };
+}
+
 /**
  * Releases every temporary block whose time has passed, so the blocked list is
  * always accurate to the second. Returns how many were released.

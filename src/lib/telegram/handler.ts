@@ -435,24 +435,47 @@ async function renderPopularSearches(chatId: number, messageId: number) {
     }).catch(() => {});
     return;
   }
-  const pct = (a: number, b: number) => (b > 0 ? `${((a / b) * 100).toFixed(1)}%` : "0%");
-  const lines = top.map((r: any, i: number) => {
+  const pct = (a: number, b: number) => (b > 0 ? ((a / b) * 100).toFixed(1) : "0.0");
+  // Mini success bar out of 10 blocks, e.g. ███████░░░
+  const bar = (a: number, b: number) => {
+    const n = b > 0 ? Math.round((a / b) * 10) : 0;
+    return "🟩".repeat(n) + "⬜".repeat(10 - n);
+  };
+  const medal = (i: number) => (i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}.`);
+  const rows = top.map((r: any, i: number) => {
     const s = Number(r.searches || 0);
     const f = Number(r.found_count || 0);
-    const icon = f > 0 ? (Number(r.notfound_count || 0) > 0 ? "🟡" : "🟢") : "🔴";
+    const nf = Number(r.notfound_count || 0);
+    const share = totals.searches > 0 ? ((s / totals.searches) * 100).toFixed(1) : "0.0";
     return (
-      `${i + 1}. ${icon} <b>${escapeHtml(String(r.query || "").slice(0, 60))}</b>\n` +
-      `   🔎 ${s.toLocaleString()} חיפושים · ✅ ${f.toLocaleString()} נמצאו · ❌ ${Number(r.notfound_count || 0).toLocaleString()} · הצלחה ${pct(f, s)}`
+      `${medal(i)} <b>${escapeHtml(String(r.query || "").slice(0, 40))}</b>  <i>(${share}% מכלל החיפושים)</i>\n` +
+      `<code>${bar(f, s)}</code> ${pct(f, s)}% הצלחה\n` +
+      `🔎 ${s.toLocaleString()} · ✅ ${f.toLocaleString()} · ❌ ${nf.toLocaleString()}`
     );
   });
-  const text =
-    `🔥 <b>30 החיפושים הפופולריים ביותר</b>\n\n` +
-    `📊 סה״כ ביטויי חיפוש: <b>${totals.terms.toLocaleString()}</b>\n` +
-    `🔎 סה״כ חיפושים: <b>${totals.searches.toLocaleString()}</b>\n` +
-    `✅ עם תוצאות: <b>${totals.found.toLocaleString()}</b> · ❌ ללא תוצאות: <b>${totals.notfound.toLocaleString()}</b>\n` +
-    `🎯 <b>אחוז הצלחה כולל: ${pct(totals.found, totals.searches)}</b>\n\n` +
-    lines.join("\n");
-  await editMessageText(chatId, messageId, text.slice(0, 4000), { reply_markup: kb }).catch(() => {});
+  // Split into two pages worth of text if too long (Telegram caps at 4096 chars).
+  const header =
+    `🔥 <b>טבלת 30 החיפושים הפופולריים</b>\n` +
+    `━━━━━━━━━━━━━━━\n` +
+    `📊 <b>סיכום כללי</b>\n` +
+    `▫️ ביטויים ייחודיים: <b>${totals.terms.toLocaleString()}</b>\n` +
+    `▫️ סה״כ חיפושים: <b>${totals.searches.toLocaleString()}</b>\n` +
+    `▫️ נמצאו תוצאות: <b>${totals.found.toLocaleString()}</b> (${pct(totals.found, totals.searches)}%)\n` +
+    `▫️ לא נמצאו: <b>${totals.notfound.toLocaleString()}</b> (${pct(totals.notfound, totals.searches)}%)\n` +
+    `🎯 הצלחה כוללת: <code>${bar(totals.found, totals.searches)}</code> <b>${pct(totals.found, totals.searches)}%</b>\n` +
+    `━━━━━━━━━━━━━━━\n`;
+  let text = header + "\n";
+  let page = 0;
+  for (const row of rows) {
+    if ((text + row).length > 3900) {
+      // Keep the message under the limit; the list simply ends.
+      break;
+    }
+    text += row + "\n\n";
+    page++;
+  }
+  text += `<i>מוצגים ${page} מתוך ${top.length} ביטויים מובילים</i>`;
+  await editMessageText(chatId, messageId, text, { reply_markup: kb }).catch(() => {});
 }
 
 // ───── Blocked words ─────

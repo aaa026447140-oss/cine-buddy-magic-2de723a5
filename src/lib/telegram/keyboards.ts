@@ -279,7 +279,10 @@ export function adminPanelKeyboard(
   if (isMain) {
     rows.push([{ text: "👥 ניהול אדמינים", callback_data: "admin_manage" }]);
   }
-  rows.push([{ text: "« סגור", callback_data: "admin_close" }]);
+  rows.push([
+    { text: "🏠 חזרה לתפריט", callback_data: "back_to_start" },
+    { text: "« סגור", callback_data: "admin_close" },
+  ]);
   return { inline_keyboard: rows };
 }
 

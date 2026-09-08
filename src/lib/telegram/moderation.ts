@@ -2,32 +2,48 @@
  * Detection of inappropriate (adult) search queries plus human-readable
  * Hebrew formatting for the escalating auto-block durations.
  */
-const PATTERNS: RegExp[] = [
-  /פורנ/i,
-  /פורנו/i,
-  /סקס/i,
-  /זיון|זיונ|לזיין|מזדיינ/i,
-  /עירומ|עירום|עירומה/i,
-  /שרמוט|זונה|זונות/i,
-  /כוס\s*של|זין|פות/i,
-  /אורגזמ|אונן|אוננ/i,
-  /מציצה|ביאה|אנאלי/i,
+const HEBREW_PATTERNS: RegExp[] = [
+  /^(?:פורנ|פורנו)$/i,
+  /^(?:סקס)$/i,
+  /^(?:זיון|זיונים|לזיין|מזדיין|מזדיינת|מזדיינים)$/i,
+  /^(?:עירום|עירומה|עירומים|עירומות)$/i,
+  /^(?:שרמוטה|שרמוטות|זונה|זונות)$/i,
+  /^(?:כוס|זין|פות)$/i,
+  /^(?:אורגזמה|אורגזמות|אונן|אוננות)$/i,
+  /^(?:מציצה|מציצות|ביאה|אנאלי)$/i,
+  /^(?:חשפן|חשפנית|חשפנים|חשפניות)$/i,
+];
+
+const LATIN_PATTERNS: RegExp[] = [
   /\bporn\b|\bporno\b|\bpornhub\b|\bxxx\b|\bxnxx\b|\bxvideos\b/i,
   /\bsex\b|\bsexy\b|\bnude\b|\bnudes\b|\bnaked\b/i,
   /\bhentai\b|\bmilf\b|\banal\b|\bblowjob\b|\bboobs\b|\bfuck\w*\b/i,
   /\berotic\b|\bcamgirl\b|\bonlyfans\b|\bnsfw\b/i,
-  /\bחשפנ/i,
-  /תשמישי|למבוגרים בלבד/i,
 ];
+
+const HEBREW_PHRASES = ["כוס של", "תשמישי מין", "למבוגרים בלבד"];
+
+function normalizedTokens(raw: string): string[] {
+  return raw
+    .toLowerCase()
+    .replace(/[\u0591-\u05C7]/g, "")
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean);
+}
 
 export function isInappropriateQuery(raw: string): boolean {
   const q = (raw || "").toLowerCase().replace(/[\u0591-\u05C7]/g, "");
-  return PATTERNS.some((re) => re.test(q));
+  if (!q) return false;
+  if (HEBREW_PHRASES.some((phrase) => q.includes(phrase))) return true;
+  if (LATIN_PATTERNS.some((re) => re.test(q))) return true;
+  return normalizedTokens(q).some((token) => HEBREW_PATTERNS.some((re) => re.test(token)));
 }
 
 /**
  * Matches a query against the admin-managed blocked-word list.
- * Hebrew words match as substrings; latin words match on word boundaries.
+ * Admin-managed words match complete normalized words. This prevents a short
+ * blocked sequence (for example "פורנ") from blocking an unrelated movie
+ * title that merely contains those letters (for example "קליפורניקיישן").
  */
 export function matchesBlockedWords(raw: string, words: string[]): boolean {
   const q = (raw || "").toLowerCase().replace(/[\u0591-\u05C7]/g, "");
@@ -35,12 +51,14 @@ export function matchesBlockedWords(raw: string, words: string[]): boolean {
   for (const w of words) {
     const word = (w || "").trim().toLowerCase();
     if (!word) continue;
-    if (/^[a-z0-9 ]+$/.test(word)) {
-      const re = new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i");
-      if (re.test(q)) return true;
-    } else if (q.includes(word)) {
-      return true;
+    const normalizedWord = word.replace(/[\u0591-\u05C7]/g, "");
+    if (normalizedWord.includes(" ")) {
+      const phrase = normalizedWord.split(/\s+/).filter(Boolean).join(" ");
+      const normalizedQuery = normalizedTokens(q).join(" ");
+      if (normalizedQuery.split(" ").join(" ").includes(phrase)) return true;
+      continue;
     }
+    if (normalizedTokens(q).includes(normalizedWord)) return true;
   }
   return false;
 }

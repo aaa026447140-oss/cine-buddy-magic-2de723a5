@@ -23,6 +23,7 @@ import {
   countBroadcastRecipients,
   createBroadcastJob,
   listRequiredChannels,
+  MAX_REQUIRED_GROUPS,
   listUsersPaged,
   listPremiumMembersPaged,
   listStarSupportersPaged,
@@ -2250,6 +2251,14 @@ async function handleAdminCallback(cq: any, data: string) {
         "⏳ שלח ערוץ חובה <b>זמני</b> ומספר ימים, בפורמט:\n\n" +
           "<code>@my_channel 7</code> — חובה למשך 7 ימים\n\nהבוט חייב להיות אדמין בערוץ.\n\nשלח /cancel לביטול.",
       );
+    case "admin_req_add_group":
+      await setAdminState(userId, "awaiting_required_add", { kind: "group" });
+      return await sendMessage(
+        chatId,
+        "👥 שלח את <b>שם המשתמש</b> או <b>ה-ID</b> של <b>קבוצת החיפוש הרשמית</b> (קבוצת חובה).\n" +
+          "דוגמה: <code>@mygroup</code> או <code>-1001234567890</code>\n" +
+          "הבוט חייב להיות אדמין בקבוצה.\n\nשלח /cancel לביטול.",
+      );
     case "admin_set_search_group":
       await setAdminState(userId, "awaiting_search_group");
       return await sendMessage(
@@ -2749,7 +2758,12 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
       const me = await getMe();
       const mem: any = await getChatMember(ch.id, me.id).catch(() => null);
       if (!mem || !["administrator", "creator"].includes(mem.status)) {
-        await sendMessage(chatId, "❌ הבוט לא אדמין בערוץ הזה. הוסף אותו כאדמין ונסה שוב.");
+        await sendMessage(
+          chatId,
+          kind === "group"
+            ? "❌ הבוט לא אדמין בקבוצה הזאת. הוסף אותו כאדמין ונסה שוב."
+            : "❌ הבוט לא אדמין בערוץ הזה. הוסף אותו כאדמין ונסה שוב.",
+        );
         return;
       }
       let invite = ch.invite_link as string | null;
@@ -2790,7 +2804,8 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
   }
 
   if (st.state === "awaiting_required_add") {
-    const kind: "permanent" | "temporary" = st.data?.kind === "temporary" ? "temporary" : "permanent";
+    const kind: "permanent" | "temporary" | "group" =
+      st.data?.kind === "temporary" ? "temporary" : st.data?.kind === "group" ? "group" : "permanent";
     const parts = text.split(/\s+/);
     const ref = parts[0] || "";
     const days = Number(parts[1] ?? "0");
@@ -2799,8 +2814,8 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
       return;
     }
     const existing = await listRequiredChannels();
-    const count = existing.filter((c) => (c.kind === "temporary") === (kind === "temporary")).length;
-    const max = kind === "temporary" ? MAX_TEMPORARY_REQUIRED : MAX_PERMANENT_REQUIRED;
+    const count = existing.filter((c) => (c.kind || "permanent") === kind).length;
+    const max = kind === "temporary" ? MAX_TEMPORARY_REQUIRED : kind === "group" ? MAX_REQUIRED_GROUPS : MAX_PERMANENT_REQUIRED;
     if (count >= max) {
       await setAdminState(userId, null);
       await sendMessage(chatId, `❌ הגעת למקסימום (${max}) ערוצי חובה מסוג זה. הסר ערוץ קיים תחילה.`);
@@ -2835,11 +2850,13 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
       await setAdminState(userId, null);
       await sendMessage(
         chatId,
-        `✅ ערוץ חובה ${kind === "temporary" ? `<b>זמני</b> (${days} ימים)` : "<b>קבוע</b>"} נוסף: ` +
+        (kind === "group"
+          ? "✅ נקבעה <b>קבוצת חיפוש חובה</b>: "
+          : `✅ ערוץ חובה ${kind === "temporary" ? `<b>זמני</b> (${days} ימים)` : "<b>קבוע</b>"} נוסף: `) +
           `<b>${escapeHtml(ch.title || ch.username || String(ch.id))}</b>`,
       );
     } catch (e: any) {
-      await sendMessage(chatId, `❌ לא הצלחתי לאמת את הערוץ.\n${escapeHtml(e?.description || e?.message || "")}`);
+      await sendMessage(chatId, `❌ לא הצלחתי לאמת את היעד.\n${escapeHtml(e?.description || e?.message || "")}`);
     }
     return;
   }
@@ -3095,8 +3112,9 @@ async function renderRequiredChannels(chatId: number, messageId: number) {
       expires_at: null,
     });
   }
-  const perm = rows.filter((c) => c.kind !== "temporary");
+  const perm = rows.filter((c) => c.kind !== "temporary" && c.kind !== "group");
   const temp = rows.filter((c) => c.kind === "temporary");
+  const grp = rows.filter((c) => c.kind === "group");
   const fmt = (c: (typeof rows)[number]) =>
     `• <b>${escapeHtml(c.title || c.username || String(c.chat_id))}</b>` +
     (c.expires_at ? ` — עד ${new Date(c.expires_at).toLocaleString("he-IL")}` : "");
@@ -3104,12 +3122,14 @@ async function renderRequiredChannels(chatId: number, messageId: number) {
     `🔒 <b>ערוצי חובה</b>\n\n` +
     `📌 <b>קבועים (${perm.length}/${MAX_PERMANENT_REQUIRED})</b>\n${perm.length ? perm.map(fmt).join("\n") : "<i>אין</i>"}\n\n` +
     `⏳ <b>זמניים (${temp.length}/${MAX_TEMPORARY_REQUIRED})</b>\n${temp.length ? temp.map(fmt).join("\n") : "<i>אין</i>"}\n\n` +
-    `כל משתמש חייב להיות מנוי לכל הערוצים ברשימה. לחיצה על ❌ מסירה ערוץ.`;
+    `👥 <b>קבוצות חיפוש חובה (${grp.length}/${MAX_REQUIRED_GROUPS})</b>\n${grp.length ? grp.map(fmt).join("\n") : "<i>אין</i>"}\n\n` +
+    `כל משתמש חייב להיות חבר בכל הערוצים והקבוצות ברשימה. לחיצה על ❌ מסירה מהרשימה.`;
   await editMessageText(chatId, messageId, text, {
     reply_markup: requiredChannelsKeyboard(
       rows as any,
       perm.length < MAX_PERMANENT_REQUIRED,
       temp.length < MAX_TEMPORARY_REQUIRED,
+      grp.length < MAX_REQUIRED_GROUPS,
     ),
   }).catch(() => {});
 }

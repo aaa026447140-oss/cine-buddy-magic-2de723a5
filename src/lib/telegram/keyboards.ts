@@ -210,16 +210,18 @@ export function requiredChannelsKeyboard(
   channels: { chat_id: number; title: string | null; username: string | null; kind: string; expires_at: string | null }[],
   canAddPermanent: boolean,
   canAddTemporary: boolean,
+  canAddGroup: boolean = true,
 ) {
   const rows: any[][] = [];
   for (const c of channels) {
-    const icon = c.kind === "temporary" ? "⏳" : "📌";
+    const icon = c.kind === "temporary" ? "⏳" : c.kind === "group" ? "👥" : "📌";
     rows.push([
       { text: `❌ ${icon} ${truncate(c.title || c.username || String(c.chat_id), 40)}`, callback_data: `admin_req_rm_${c.chat_id}` },
     ]);
   }
   if (canAddPermanent) rows.push([{ text: "➕ הוסף ערוץ חובה קבוע", callback_data: "admin_req_add_perm" }]);
   if (canAddTemporary) rows.push([{ text: "⏳ הוסף ערוץ חובה זמני", callback_data: "admin_req_add_temp" }]);
+  if (canAddGroup) rows.push([{ text: "👥 הגדרת קבוצת חיפוש חובה", callback_data: "admin_req_add_group" }]);
   rows.push([{ text: "« חזרה", callback_data: "admin_open" }]);
   return { inline_keyboard: rows };
 }

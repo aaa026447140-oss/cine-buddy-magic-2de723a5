@@ -2822,7 +2822,12 @@ async function handleAdminStateInput(chatId: number, userId: number, st: { state
       const me = await getMe();
       const mem: any = await getChatMember(ch.id, me.id).catch(() => null);
       if (!mem || !["administrator", "creator"].includes(mem.status)) {
-        await sendMessage(chatId, "❌ הבוט לא אדמין בערוץ הזה. הוסף אותו כאדמין ונסה שוב.");
+        await sendMessage(
+          chatId,
+          kind === "group"
+            ? "❌ הבוט לא אדמין בקבוצה הזאת. הוסף אותו כאדמין ונסה שוב."
+            : "❌ הבוט לא אדמין בערוץ הזה. הוסף אותו כאדמין ונסה שוב.",
+        );
         return;
       }
       let invite = ch.invite_link as string | null;

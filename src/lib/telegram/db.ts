@@ -1472,12 +1472,13 @@ export type RequiredChannelRow = {
   username: string | null;
   title: string | null;
   invite_link: string | null;
-  kind: "permanent" | "temporary";
+  kind: "permanent" | "temporary" | "group";
   expires_at: string | null;
 };
 
 export const MAX_PERMANENT_REQUIRED = 3;
 export const MAX_TEMPORARY_REQUIRED = 5;
+export const MAX_REQUIRED_GROUPS = 3;
 
 export async function listRequiredChannels(): Promise<RequiredChannelRow[]> {
   const { data } = await admin()
@@ -1499,7 +1500,7 @@ export async function addRequiredChannel(p: {
   username: string | null;
   title: string | null;
   invite_link: string | null;
-  kind: "permanent" | "temporary";
+  kind: "permanent" | "temporary" | "group";
   expires_at: string | null;
   added_by: number;
 }) {

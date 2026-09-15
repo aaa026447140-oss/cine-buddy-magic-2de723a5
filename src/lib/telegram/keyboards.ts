@@ -207,16 +207,23 @@ export function subscribeChannelsKeyboard(
 }
 
 export function requiredChannelsKeyboard(
-  channels: { chat_id: number; title: string | null; username: string | null; kind: string; expires_at: string | null }[],
+  channels: { chat_id: number; title: string | null; username: string | null; kind: string; expires_at: string | null; muted?: boolean }[],
   canAddPermanent: boolean,
   canAddTemporary: boolean,
   canAddGroup: boolean = true,
 ) {
   const rows: any[][] = [];
   for (const c of channels) {
-    const icon = c.kind === "temporary" ? "⏳" : c.kind === "group" ? "👥" : "📌";
+    const label = truncate(c.title || c.username || String(c.chat_id), 38);
+    if (c.kind === "group") {
+      rows.push([
+        { text: `👥${c.muted ? "🔇" : ""} ${label}`, callback_data: `admin_reqg:${c.chat_id}` },
+      ]);
+      continue;
+    }
+    const icon = c.kind === "temporary" ? "⏳" : "📌";
     rows.push([
-      { text: `❌ ${icon} ${truncate(c.title || c.username || String(c.chat_id), 40)}`, callback_data: `admin_req_rm_${c.chat_id}` },
+      { text: `❌ ${icon} ${label}`, callback_data: `admin_req_rm_${c.chat_id}` },
     ]);
   }
   if (canAddPermanent) rows.push([{ text: "➕ הוסף ערוץ חובה קבוע", callback_data: "admin_req_add_perm" }]);

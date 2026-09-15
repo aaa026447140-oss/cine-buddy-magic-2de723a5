@@ -3113,6 +3113,36 @@ function displayUserName(u: BotUserRow): string {
 
 const USERS_PAGE_SIZE = 15;
 
+/** Stats + actions for one required search group. */
+async function renderRequiredGroup(chatId: number, messageId: number, cid: number) {
+  if (!Number.isFinite(cid)) return await renderRequiredChannels(chatId, messageId);
+  const row = await getRequiredChannel(cid).catch(() => null);
+  if (!row) return await renderRequiredChannels(chatId, messageId);
+  const [g, info, members] = await Promise.all([
+    getGroupRow(cid).catch(() => null),
+    getChat(cid).catch(() => null) as Promise<any>,
+    (async () => {
+      try {
+        return Number(await tg<number>("getChatMemberCount", { chat_id: cid }));
+      } catch {
+        return null;
+      }
+    })(),
+  ]);
+  const title = escapeHtml(info?.title || row.title || row.username || String(cid));
+  const muted = !!row.muted;
+  const text =
+    `👥 <b>${title}</b>\n\n` +
+    `🆔 <code>${cid}</code>\n` +
+    (row.username ? `🔗 @${escapeHtml(row.username)}\n` : "") +
+    `👨‍👩‍👧 חברים בקבוצה: <b>${members != null ? members.toLocaleString() : "לא זמין"}</b>\n` +
+    `📌 סטטוס: <b>קבוצת חובה</b>\n` +
+    `🔇 מצב השתק: <b>${muted ? "פעיל — אין תוצאות חיפוש בקבוצה" : "כבוי — הבוט מחזיר תוצאות"}</b>\n` +
+    `💎 פרימיום לקבוצה: <b>${g?.is_premium ? "פעיל" : "לא פעיל"}</b>\n\n` +
+    `בחר פעולה:`;
+  await editMessageText(chatId, messageId, text, { reply_markup: requiredGroupKeyboard(cid, muted) }).catch(() => {});
+}
+
 async function renderRequiredChannels(chatId: number, messageId: number) {
   const [list, settings] = await Promise.all([listRequiredChannels(), getSettings()]);
   const rows = [...list];

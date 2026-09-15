@@ -1474,16 +1474,37 @@ export type RequiredChannelRow = {
   invite_link: string | null;
   kind: "permanent" | "temporary" | "group";
   expires_at: string | null;
+  muted?: boolean;
 };
 
 export const MAX_PERMANENT_REQUIRED = 3;
 export const MAX_TEMPORARY_REQUIRED = 5;
-export const MAX_REQUIRED_GROUPS = 3;
+export const MAX_REQUIRED_GROUPS = 5;
+
+/** Mute = chat stays a required membership, but the bot serves no search results there. */
+export async function setRequiredChannelMuted(chat_id: number, muted: boolean) {
+  await admin().from("required_channels").update({ muted } as any).eq("chat_id", chat_id);
+}
+
+export async function getRequiredChannel(chat_id: number): Promise<RequiredChannelRow | null> {
+  const { data } = await admin()
+    .from("required_channels")
+    .select("chat_id,username,title,invite_link,kind,expires_at,muted")
+    .eq("chat_id", chat_id)
+    .maybeSingle();
+  if (!data) return null;
+  return { ...(data as any), chat_id: Number((data as any).chat_id) } as RequiredChannelRow;
+}
+
+export async function isMutedRequiredGroup(chat_id: number): Promise<boolean> {
+  const row = await getRequiredChannel(chat_id).catch(() => null);
+  return !!row?.muted;
+}
 
 export async function listRequiredChannels(): Promise<RequiredChannelRow[]> {
   const { data } = await admin()
     .from("required_channels")
-    .select("chat_id,username,title,invite_link,kind,expires_at")
+    .select("chat_id,username,title,invite_link,kind,expires_at,muted")
     .order("created_at", { ascending: true });
   const rows = ((data ?? []) as any[]).map((r) => ({ ...r, chat_id: Number(r.chat_id) })) as RequiredChannelRow[];
   // Drop expired temporary channels lazily.

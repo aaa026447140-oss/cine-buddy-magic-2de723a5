@@ -559,6 +559,7 @@ export type Database = {
           expires_at: string | null
           invite_link: string | null
           kind: string
+          muted: boolean
           title: string | null
           username: string | null
         }
@@ -569,6 +570,7 @@ export type Database = {
           expires_at?: string | null
           invite_link?: string | null
           kind?: string
+          muted?: boolean
           title?: string | null
           username?: string | null
         }
@@ -579,6 +581,7 @@ export type Database = {
           expires_at?: string | null
           invite_link?: string | null
           kind?: string
+          muted?: boolean
           title?: string | null
           username?: string | null
         }

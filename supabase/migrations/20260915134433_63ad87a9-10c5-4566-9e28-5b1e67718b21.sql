@@ -1,0 +1,1 @@
+ALTER TABLE public.required_channels ADD COLUMN IF NOT EXISTS muted boolean NOT NULL DEFAULT false;

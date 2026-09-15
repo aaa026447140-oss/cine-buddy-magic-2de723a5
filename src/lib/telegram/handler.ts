@@ -2547,6 +2547,16 @@ async function handleAdminCallback(cq: any, data: string) {
       blockedOnly: blockedText === "1",
     });
   }
+  if (data.startsWith("admin_reqg_m:")) {
+    const [, idText, onText] = data.split(":");
+    const cid = Number(idText);
+    if (Number.isFinite(cid)) await setRequiredChannelMuted(cid, onText === "1").catch(() => {});
+    return await renderRequiredGroup(chatId, messageId, cid);
+  }
+  if (data.startsWith("admin_reqg:")) {
+    const cid = Number(data.split(":")[1]);
+    return await renderRequiredGroup(chatId, messageId, cid);
+  }
   if (data.startsWith("admin_req_rm_")) {
     const cid = Number(data.slice("admin_req_rm_".length));
     if (Number.isFinite(cid)) {

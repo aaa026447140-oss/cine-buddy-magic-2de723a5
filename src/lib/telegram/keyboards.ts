@@ -233,6 +233,22 @@ export function requiredChannelsKeyboard(
   return { inline_keyboard: rows };
 }
 
+/** Actions for a single required search group. */
+export function requiredGroupKeyboard(chatId: number, muted: boolean) {
+  return {
+    inline_keyboard: [
+      [
+        {
+          text: muted ? "🔊 בטל מצב השתק" : "🔇 הפעל מצב השתק",
+          callback_data: `admin_reqg_m:${chatId}:${muted ? 0 : 1}`,
+        },
+      ],
+      [{ text: "❌ הסר את הקבוצה", callback_data: `admin_req_rm_${chatId}` }],
+      [{ text: "« חזרה", callback_data: "admin_required" }],
+    ],
+  };
+}
+
 export function adminPanelKeyboard(
   isMain: boolean,
   support?: { hasGroup: boolean; topicsOn: boolean; locked?: boolean; lockPremium?: boolean },

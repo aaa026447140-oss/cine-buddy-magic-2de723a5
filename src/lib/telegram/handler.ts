@@ -745,6 +745,8 @@ async function handleMessage(msg: any) {
         return; // other commands stay private-only
       }
       if (text.length < 2) return;
+      // Muted required group: membership still required, but no search results here.
+      if (await isMutedRequiredGroup(Number(chat.id)).catch(() => false)) return;
       // Blocked user in a group: silently ignore search attempts, but notify them.
       const bu = await getBotUser(Number(from.id)).catch(() => null);
       if (bu?.is_blocked && !(await releaseIfExpired(bu).catch(() => false))) {

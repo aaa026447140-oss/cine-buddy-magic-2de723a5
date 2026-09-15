@@ -23,6 +23,9 @@ import {
   countBroadcastRecipients,
   createBroadcastJob,
   listRequiredChannels,
+  getRequiredChannel,
+  setRequiredChannelMuted,
+  isMutedRequiredGroup,
   MAX_REQUIRED_GROUPS,
   listUsersPaged,
   listPremiumMembersPaged,
@@ -128,6 +131,7 @@ import {
   adminPanelKeyboard,
   adminsListKeyboard,
   requiredChannelsKeyboard,
+  requiredGroupKeyboard,
   subscribeChannelsKeyboard,
   resultsKeyboard,
   sourceChannelsKeyboard,
@@ -741,6 +745,8 @@ async function handleMessage(msg: any) {
         return; // other commands stay private-only
       }
       if (text.length < 2) return;
+      // Muted required group: membership still required, but no search results here.
+      if (await isMutedRequiredGroup(Number(chat.id)).catch(() => false)) return;
       // Blocked user in a group: silently ignore search attempts, but notify them.
       const bu = await getBotUser(Number(from.id)).catch(() => null);
       if (bu?.is_blocked && !(await releaseIfExpired(bu).catch(() => false))) {
@@ -2543,6 +2549,16 @@ async function handleAdminCallback(cq: any, data: string) {
       blockedOnly: blockedText === "1",
     });
   }
+  if (data.startsWith("admin_reqg_m:")) {
+    const [, idText, onText] = data.split(":");
+    const cid = Number(idText);
+    if (Number.isFinite(cid)) await setRequiredChannelMuted(cid, onText === "1").catch(() => {});
+    return await renderRequiredGroup(chatId, messageId, cid);
+  }
+  if (data.startsWith("admin_reqg:")) {
+    const cid = Number(data.split(":")[1]);
+    return await renderRequiredGroup(chatId, messageId, cid);
+  }
   if (data.startsWith("admin_req_rm_")) {
     const cid = Number(data.slice("admin_req_rm_".length));
     if (Number.isFinite(cid)) {
@@ -3098,6 +3114,36 @@ function displayUserName(u: BotUserRow): string {
 }
 
 const USERS_PAGE_SIZE = 15;
+
+/** Stats + actions for one required search group. */
+async function renderRequiredGroup(chatId: number, messageId: number, cid: number) {
+  if (!Number.isFinite(cid)) return await renderRequiredChannels(chatId, messageId);
+  const row = await getRequiredChannel(cid).catch(() => null);
+  if (!row) return await renderRequiredChannels(chatId, messageId);
+  const [g, info, members] = await Promise.all([
+    getGroupRow(cid).catch(() => null),
+    getChat(cid).catch(() => null) as Promise<any>,
+    (async () => {
+      try {
+        return Number(await tg<number>("getChatMemberCount", { chat_id: cid }));
+      } catch {
+        return null;
+      }
+    })(),
+  ]);
+  const title = escapeHtml(info?.title || row.title || row.username || String(cid));
+  const muted = !!row.muted;
+  const text =
+    `👥 <b>${title}</b>\n\n` +
+    `🆔 <code>${cid}</code>\n` +
+    (row.username ? `🔗 @${escapeHtml(row.username)}\n` : "") +
+    `👨‍👩‍👧 חברים בקבוצה: <b>${members != null ? members.toLocaleString() : "לא זמין"}</b>\n` +
+    `📌 סטטוס: <b>קבוצת חובה</b>\n` +
+    `🔇 מצב השתק: <b>${muted ? "פעיל — אין תוצאות חיפוש בקבוצה" : "כבוי — הבוט מחזיר תוצאות"}</b>\n` +
+    `💎 פרימיום לקבוצה: <b>${g?.is_premium ? "פעיל" : "לא פעיל"}</b>\n\n` +
+    `בחר פעולה:`;
+  await editMessageText(chatId, messageId, text, { reply_markup: requiredGroupKeyboard(cid, muted) }).catch(() => {});
+}
 
 async function renderRequiredChannels(chatId: number, messageId: number) {
   const [list, settings] = await Promise.all([listRequiredChannels(), getSettings()]);

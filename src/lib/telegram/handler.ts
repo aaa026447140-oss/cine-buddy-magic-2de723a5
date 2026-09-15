@@ -26,7 +26,6 @@ import {
   getRequiredChannel,
   setRequiredChannelMuted,
   isMutedRequiredGroup,
-  getGroupRow,
   MAX_REQUIRED_GROUPS,
   listUsersPaged,
   listPremiumMembersPaged,

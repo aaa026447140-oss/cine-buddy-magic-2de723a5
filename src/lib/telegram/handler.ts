@@ -128,6 +128,7 @@ import {
   adminPanelKeyboard,
   adminsListKeyboard,
   requiredChannelsKeyboard,
+  requiredGroupKeyboard,
   subscribeChannelsKeyboard,
   resultsKeyboard,
   sourceChannelsKeyboard,
